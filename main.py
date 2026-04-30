@@ -1,6 +1,9 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1 import endpoints
+from app.database.sqlite_db import init_db
+
+
 
 def create_app() -> FastAPI:
     # FastAPI 앱 초기화
@@ -37,4 +40,6 @@ app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
+    init_db()
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+   
