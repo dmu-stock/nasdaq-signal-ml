@@ -22,6 +22,9 @@ data/*.csv
 data/*.parquet
 !data/sample.csv # 제외 파일
 
+# 실행 결과 / 디버그 산출물
+*.csv
+
 # OS 및 IDE 설정
 .vscode/
 .idea/
