@@ -37,6 +37,25 @@ BLUE_CHIP_STOCKS = [
     "UNH",    # UnitedHealth Group
 ]
 
+#RSI 계산 함수
+def calcurate_rsi(df, period=14):
+    delta = df['Adj Close'].diff()
+
+    # 2. 상승분(U)과 하락분(D) 분리
+    up = delta.copy()
+    down = delta.copy()
+    up[up < 0] = 0
+    down[down > 0] = 0
+
+    avg_gain = up.rolling(window=period).mean()
+    avg_loss = down.abs().rolling(window=period).mean()
+
+    # 4. RS(상대강도) 및 RSI 계산
+    rs = avg_gain / avg_loss
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    
+    return rsi
+
 
 def fetch_price_data(
     ticker: str,
@@ -106,8 +125,6 @@ def fetch_price_data(
         # Date 인덱스를 컬럼으로 변환
         df = df.reset_index()
 
-        df.columns = [str(col).capitalize() if str(col).lower() == 'date' else col for col in df.columns]
-
         # 종목 식별용 ticker 컬럼 추가
         df["ticker"] = ticker
 
@@ -121,7 +138,13 @@ def fetch_price_data(
 
         # 등락률 컬럼 추가
         df['change_rate'] = df.groupby('ticker')['Adj Close'].pct_change()
-        df['change_rate'] = df['change_rate'].fillna(0)
+
+        df['ma5'] = df['Adj Close'].rolling(window=5).mean()
+        df['ma20'] = df['Adj Close'].rolling(window=20).mean()
+
+        df['rsi'] = calcurate_rsi(df, period=14)
+        df = df.fillna(0)
+
 
         df = df.rename(columns={
             "Date": "date",
@@ -136,7 +159,7 @@ def fetch_price_data(
         # 분석에 필요한 컬럼만 선택
         # (Dividends, Stock Splits 등은 제거)
         df = df[
-            ["date", "ticker", "open", "high", "low", "close", "adj_close","volume","change_rate"]
+            ["date", "ticker", "open", "high", "low", "close", "adj_close","volume","change_rate", "ma5", "ma20", "rsi"]
         ]
 
         # 결측치 제거
