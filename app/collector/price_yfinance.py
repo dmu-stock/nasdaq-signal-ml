@@ -37,70 +37,43 @@ BLUE_CHIP_STOCKS = [
     "UNH",    # UnitedHealth Group
 ]
 
-#RSI 계산 함수
-def calcurate_rsi(df, period=14):
-    delta = df['Adj Close'].diff()
+def get_nasdaq_data(period: str = "2y") ->  Optional[pd.DataFrame]:
+    nasdaq = yf.download(
+        "^IXIC",
+        period=period, 
+        interval="1d",
+        auto_adjust=False, 
+        progress=False 
+    ) 
+    # 데이터가 없는 경우 조기 반환
+    if nasdaq.empty:
+        print("[경고] ^IXIC: 수집된 데이터가 없습니다.")
+        return None
 
-    # 2. 상승분(U)과 하락분(D) 분리
-    up = delta.copy()
-    down = delta.copy()
-    up[up < 0] = 0
-    down[down > 0] = 0
-
-    avg_gain = up.rolling(window=period).mean()
-    avg_loss = down.abs().rolling(window=period).mean()
-
-    # 4. RS(상대강도) 및 RSI 계산
-    rs = avg_gain / avg_loss
-    rsi = 100.0 - (100.0 / (1.0 + rs))
+    if isinstance(nasdaq.columns, pd.MultiIndex):
+        nasdaq.columns = nasdaq.columns.get_level_values(0)
     
-    return rsi
+    nasdaq = nasdaq.reset_index()
+
+    nasdaq["Date"] = (
+        pd.to_datetime(nasdaq["Date"])
+        .dt.tz_localize(None)
+        .dt.date
+    )
+
+    nasdaq['nasdaq_change_rate'] = nasdaq['Adj Close'].pct_change()
+
+    return nasdaq[['Date', 'Adj Close', 'nasdaq_change_rate']].rename(columns={'Adj Close': 'nasdaq_close'})
 
 
 def fetch_price_data(
     ticker: str,
+    nasdaq_df,
     period: str = "2y",
     interval: str = "1d"
 ) -> Optional[pd.DataFrame]:
-    """
-    단일 종목의 과거 주가 데이터를 수집하고 전처리하여 반환한다.
-
-    처리 흐름:
-    1. Yahoo Finance에서 주가 이력 데이터 요청
-    2. Date 인덱스를 컬럼으로 변환
-    3. 분석에 필요한 컬럼만 선택
-    4. 결측치 제거 및 정렬
-
-    Parameters
-    ----------
-    ticker : str
-        종목 티커 심볼 (예: "AAPL")
-    period : str
-        조회 기간 (기본값: "2y")
-    interval : str
-        데이터 간격 (기본값: "1d", 일봉)
-
-    Returns
-    -------
-    pd.DataFrame or None
-        전처리된 OHLCV DataFrame.
-        수집 실패 시 None 반환.
-
-        컬럼:
-        - Date
-        - ticker
-        - Open
-        - High
-        - Low
-        - Close
-        - Adj Close
-        - Volume
-    """
-
+    
     try:
-        # Yahoo Finance Ticker 객체 생성
-        # stock = yf.Ticker(ticker)
-
         # 주가 이력 데이터 요청
         df = yf.download(
             ticker,
@@ -139,12 +112,13 @@ def fetch_price_data(
         # 등락률 컬럼 추가
         df['change_rate'] = df.groupby('ticker')['Adj Close'].pct_change()
 
-        df['ma5'] = df['Adj Close'].rolling(window=5).mean()
-        df['ma20'] = df['Adj Close'].rolling(window=20).mean()
+        # 나스닥 데이터와 날짜 기준으로 병합 (Left Join)
+        df = pd.merge(df, nasdaq_df, on='Date', how='left')
 
-        df['rsi'] = calcurate_rsi(df, period=14)
+        # 시장 변화율 - 종목 등락률
+        df['market_diff'] = df['nasdaq_change_rate'] - df['change_rate']
+
         df = df.fillna(0)
-
 
         df = df.rename(columns={
             "Date": "date",
@@ -159,7 +133,7 @@ def fetch_price_data(
         # 분석에 필요한 컬럼만 선택
         # (Dividends, Stock Splits 등은 제거)
         df = df[
-            ["date", "ticker", "open", "high", "low", "close", "adj_close","volume","change_rate", "ma5", "ma20", "rsi"]
+            ["date", "ticker", "open", "high", "low", "close", "adj_close","volume","change_rate", "nasdaq_close", "nasdaq_change_rate","market_diff"]
         ]
 
         # 결측치 제거
@@ -198,10 +172,11 @@ def fetch_all_stocks_price_data(
     """
 
     data_frames = []
+    nasdaq_df=get_nasdaq_data()
 
     for ticker in tickers:
         print(f"[수집 중] {ticker} ...")
-        df = fetch_price_data(ticker, period=period)
+        df = fetch_price_data(ticker,nasdaq_df,period=period)
 
         # 수집 성공한 경우에만 추가
         if df is not None:

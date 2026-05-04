@@ -17,3 +17,35 @@
 #
 # 5. 최종 데이터 유효성 검사
 #    - 모델에 넣기 직전 데이터에 이상치나 무한대(Inf) 값이 없는지 확인
+
+import yfinance as yf
+import pandas as pd
+from typing import List, Optional
+
+#RSI 계산 함수
+def calcurate_rsi(df, period=14):
+    delta = df['Adj Close'].diff()
+
+    # 2. 상승분(U)과 하락분(D) 분리
+    up = delta.copy()
+    down = delta.copy()
+    up[up < 0] = 0
+    down[down > 0] = 0
+
+    avg_gain = up.rolling(window=period).mean()
+    avg_loss = down.abs().rolling(window=period).mean()
+
+    # 4. RS(상대강도) 및 RSI 계산
+    rs = avg_gain / avg_loss
+    rsi = 100.0 - (100.0 / (1.0 + rs))
+    
+    return rsi
+
+# 등락률 컬럼 추가
+        
+
+        # df['ma5'] = df['Adj Close'].rolling(window=5).mean()
+        # df['ma20'] = df['Adj Close'].rolling(window=20).mean()
+
+        # df['rsi'] = calcurate_rsi(df, period=14)
+       
