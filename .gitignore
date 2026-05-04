@@ -34,3 +34,5 @@ Thumbs.db
 # AI/DB 관련
 *.sqlite3
 db/
+chroma_db/
+sentiment_cache.json
