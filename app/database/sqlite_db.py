@@ -29,7 +29,7 @@ def init_db():
         change_rate REAL,       -- 등락률
         nasdaq_close REAL,          -- 나스닥 종가
         nasdaq_change_rate REAL,    -- 나스닥 등락률
-        market_diff REAL,           -- 시장 대비 초과수익률 (Rm - Rs)
+        alpha REAL,           -- 시장 대비 초과수익률 (Rm - Rs)
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(ticker, date) -- 동일 종목, 동일 날짜 데이터 중복 방지
     );

@@ -116,9 +116,10 @@ def fetch_price_data(
         df = pd.merge(df, nasdaq_df, on='Date', how='left')
 
         # 시장 변화율 - 종목 등락률
-        df['market_diff'] = df['nasdaq_change_rate'] - df['change_rate']
+        # 값 > 0 → 시장보다 강함
+        df['alpha'] = df['change_rate'] - df['nasdaq_change_rate']
 
-        df = df.fillna(0)
+        df = df.dropna()
 
         df = df.rename(columns={
             "Date": "date",
@@ -133,7 +134,7 @@ def fetch_price_data(
         # 분석에 필요한 컬럼만 선택
         # (Dividends, Stock Splits 등은 제거)
         df = df[
-            ["date", "ticker", "open", "high", "low", "close", "adj_close","volume","change_rate", "nasdaq_close", "nasdaq_change_rate","market_diff"]
+            ["date", "ticker", "open", "high", "low", "close", "adj_close","volume","change_rate", "nasdaq_close", "nasdaq_change_rate","alpha"]
         ]
 
         # 결측치 제거
