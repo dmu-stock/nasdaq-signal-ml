@@ -17,6 +17,7 @@ price_yfinance.py
 import yfinance as yf
 import pandas as pd
 from typing import List, Optional
+from app.database.sqlite_db import save_price_to_db
 
 
 # -------------------------------------------------
@@ -36,52 +37,51 @@ BLUE_CHIP_STOCKS = [
     "UNH",    # UnitedHealth Group
 ]
 
+def get_nasdaq_data(period: str = "2y") ->  Optional[pd.DataFrame]:
+    nasdaq = yf.download(
+        "^IXIC",
+        period=period, 
+        interval="1d",
+        auto_adjust=False, 
+        progress=False 
+    ) 
+    # 데이터가 없는 경우 조기 반환
+    if nasdaq.empty:
+        print("[경고] ^IXIC: 수집된 데이터가 없습니다.")
+        return None
+
+    if isinstance(nasdaq.columns, pd.MultiIndex):
+        nasdaq.columns = nasdaq.columns.get_level_values(0)
+    
+    nasdaq = nasdaq.reset_index()
+
+    nasdaq["Date"] = (
+        pd.to_datetime(nasdaq["Date"])
+        .dt.tz_localize(None)
+        .dt.date
+    )
+
+    nasdaq['nasdaq_change_rate'] = nasdaq['Adj Close'].pct_change()
+
+    return nasdaq[['Date', 'Adj Close', 'nasdaq_change_rate']].rename(columns={'Adj Close': 'nasdaq_close'})
+
 
 def fetch_price_data(
     ticker: str,
+    nasdaq_df,
     period: str = "2y",
     interval: str = "1d"
 ) -> Optional[pd.DataFrame]:
-    """
-    단일 종목의 과거 주가 데이터를 수집하고 전처리하여 반환한다.
-
-    처리 흐름:
-    1. Yahoo Finance에서 주가 이력 데이터 요청
-    2. Date 인덱스를 컬럼으로 변환
-    3. 분석에 필요한 컬럼만 선택
-    4. 결측치 제거 및 정렬
-
-    Parameters
-    ----------
-    ticker : str
-        종목 티커 심볼 (예: "AAPL")
-    period : str
-        조회 기간 (기본값: "2y")
-    interval : str
-        데이터 간격 (기본값: "1d", 일봉)
-
-    Returns
-    -------
-    pd.DataFrame or None
-        전처리된 OHLCV DataFrame.
-        수집 실패 시 None 반환.
-
-        컬럼:
-        - Date
-        - ticker
-        - Open
-        - High
-        - Low
-        - Close
-        - Volume
-    """
-
+    
     try:
-        # Yahoo Finance Ticker 객체 생성
-        stock = yf.Ticker(ticker)
-
         # 주가 이력 데이터 요청
-        df = stock.history(period=period, interval=interval)
+        df = yf.download(
+            ticker,
+            period=period,
+            interval=interval,
+            auto_adjust=False, 
+            progress=False
+        )
 
         # 데이터가 없는 경우 조기 반환
         if df.empty:
@@ -91,6 +91,9 @@ def fetch_price_data(
         # -----------------------------
         # 데이터 전처리
         # -----------------------------
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
 
         # Date 인덱스를 컬럼으로 변환
         df = df.reset_index()
@@ -106,18 +109,40 @@ def fetch_price_data(
             .dt.date
         )
 
+        # 등락률 컬럼 추가
+        df['change_rate'] = df.groupby('ticker')['Adj Close'].pct_change()
+
+        # 나스닥 데이터와 날짜 기준으로 병합 (Left Join)
+        df = pd.merge(df, nasdaq_df, on='Date', how='left')
+
+        # 시장 변화율 - 종목 등락률
+        # 값 > 0 → 시장보다 강함
+        df['alpha'] = df['change_rate'] - df['nasdaq_change_rate']
+
+        df = df.dropna()
+
+        df = df.rename(columns={
+            "Date": "date",
+            "Open": "open",
+            "High": "high",
+            "Low": "low",
+            "Close": "close",
+            "Adj Close": "adj_close",
+            "Volume": "volume"
+        })
+
         # 분석에 필요한 컬럼만 선택
         # (Dividends, Stock Splits 등은 제거)
         df = df[
-            ["Date", "ticker", "Open", "High", "Low", "Close", "Volume"]
+            ["date", "ticker", "open", "high", "low", "close", "adj_close","volume","change_rate", "nasdaq_close", "nasdaq_change_rate","alpha"]
         ]
 
         # 결측치 제거
         df = df.dropna()
 
         # 날짜 기준 오름차순 정렬
-        df = df.sort_values("Date").reset_index(drop=True)
-
+        df = df.sort_values("date").reset_index(drop=True)
+        
         return df
 
     except Exception as e:
@@ -148,10 +173,11 @@ def fetch_all_stocks_price_data(
     """
 
     data_frames = []
+    nasdaq_df=get_nasdaq_data()
 
     for ticker in tickers:
         print(f"[수집 중] {ticker} ...")
-        df = fetch_price_data(ticker, period=period)
+        df = fetch_price_data(ticker,nasdaq_df,period=period)
 
         # 수집 성공한 경우에만 추가
         if df is not None:
@@ -188,7 +214,7 @@ def save_to_csv(df: pd.DataFrame, filename: str) -> None:
     # index=False: DataFrame 인덱스는 저장하지 않음
     # utf-8-sig: Excel에서 한글 깨짐 방지
     df.to_csv(filename, index=False, encoding="utf-8-sig")
-    print(f"[저장 완료] {filename} ({len(df)}행)")
+    print(f"[CSV 저장 완료] {filename} ({len(df)}행)")
 
 
 # -------------------------------------------------
@@ -197,13 +223,18 @@ def save_to_csv(df: pd.DataFrame, filename: str) -> None:
 if __name__ == "__main__":
     # 전체 종목 가격 데이터 수집
     df_prices = fetch_all_stocks_price_data()
+    if df_prices is not None and not df_prices.empty:
+        # db 저장(학습 데이터용)
+        save_price_to_db(df_prices)
 
-    if not df_prices.empty:
         print("\n[미리보기]")
         print(df_prices.head(10))
-        print(f"\n수집 기간: {df_prices['Date'].min()} ~ {df_prices['Date'].max()}")
+        print(f"\n수집 기간: {df_prices['date'].min()} ~ {df_prices['date'].max()}")
         print(f"종목 수: {df_prices['ticker'].nunique()}")
         print(f"총 데이터 수: {len(df_prices)}")
 
         # CSV 저장 (검증/공유용)
         save_to_csv(df_prices, "bluechip_price_data.csv")
+    else:
+        print("수집된 데이터가 없습니다.")
+        

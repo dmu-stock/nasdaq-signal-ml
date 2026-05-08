@@ -17,3 +17,95 @@
 #
 # 5. 최종 데이터 유효성 검사
 #    - 모델에 넣기 직전 데이터에 이상치나 무한대(Inf) 값이 없는지 확인
+
+import pandas as pd
+import numpy as np
+from app.database.sqlite_db import get_connection
+
+class FeatureProcessor:
+    def __init__(self, db_path: str = "stock_data.db"):
+        self.db_path = db_path
+
+    def get_raw_data(self,ticker:str)->pd.DataFrame:
+        conn = get_connection()
+        query = f"SELECT * FROM stock_prices WHERE ticker = '{ticker}' ORDER BY date ASC"
+        df = pd.read_sql(query,conn)
+        conn.close()
+
+        return df
+        
+    def calc_technical_indicators(self, df, ma1=5, ma2=20, rsi_period=14):
+        df = df.sort_values('date')
+
+        # ---------------------------
+        # 이동평균 (Trend)
+        # ---------------------------
+        df['ma5'] = df['adj_close'].rolling(window=ma1).mean()
+        df['ma20'] = df['adj_close'].rolling(window=ma2).mean()
+
+        df['ma_ratio'] = df['ma5'] / df['ma20']
+        df['price_ma20'] = df['adj_close'] / df['ma20']
+
+
+        # ---------------------------
+        # RSI (Momentum)
+        # ---------------------------
+        delta = df['adj_close'].diff()
+        # 상승, 하락분 분리
+        gain = delta.copy()
+        loss = delta.copy()
+        gain[gain < 0] = 0
+        loss[loss > 0] = 0
+
+        avg_gain = gain.rolling(window=rsi_period).mean()
+        avg_loss = loss.abs().rolling(window=rsi_period).mean()
+
+        # RS(상대강도) 및 RSI 계산
+        rs = avg_gain / (avg_loss + 1e-9)
+        df['rsi'] = 100.0 - (100.0 / (1.0 + rs))
+
+        #이격도
+        # df['disparity_20'] = (df['adj_close'] - df['ma20']) / df['ma20']
+
+        # ---------------------------
+        # 3. 수익률 (Return)
+        # ---------------------------
+        if 'change_rate' in df.columns:
+            df['return_1'] = df['change_rate']
+            #5일 누적 수익률
+            df['return_5'] = (1 + df['change_rate']).rolling(5).apply(np.prod, raw=True) - 1
+
+            df['volatility_5'] = df['return_1'].rolling(5).std()
+
+        # ---------------------------
+        # 거래량
+        # ---------------------------
+        if 'volume' in df.columns:
+            df['volume_ma5'] = df['volume'].rolling(5).mean()
+            df['volume_ratio'] = df['volume'] / (df['volume_ma5'] + 1e-9)
+
+        # ---------------------------
+        # 시장 대비 (Alpha)
+        # ---------------------------
+        if 'alpha' in df.columns:
+            df['alpha_5'] = df['alpha'].rolling(5).mean()
+            df['alpha_20'] = df['alpha'].rolling(20).mean()
+
+        # 미래 수익률
+        df['target_1'] = df['adj_close'].shift(-1) / df['adj_close'] - 1
+        df['target_5'] = df['adj_close'].shift(-5) / df['adj_close'] - 1
+        # 분류 (노이즈 제거)
+        df['label'] = (df['target_5'] > 0.01).astype(int)
+        
+        df = df.dropna().reset_index(drop=True)
+
+        print(df.columns)
+
+        return df
+    
+if __name__ == "__main__":
+    processor = FeatureProcessor()
+    df = processor.get_raw_data("AAPL")
+    df = processor.calc_technical_indicators(df)
+
+    print(df.head())

@@ -34,6 +34,7 @@ from headline_preprocessor import preprocess_headlines_batch
 NEWS_COLUMNS = [
     "date",           # 뉴스 발행 날짜
     "ticker",         # 티커 (종목 / 섹터 ETF / 시장 ETF)
+    "company_name",
     "news_type",      # stock / sector / market
     "headline",       # 원본 뉴스 헤드라인
     "clean_headline", # LLM으로 정제된 헤드라인 (FinBERT 입력용)
@@ -46,10 +47,19 @@ NEWS_COLUMNS = [
 # -------------------------------------------------
 
 # 1) 개별 종목 뉴스
-STOCK_TICKERS = [
-    "AAPL", "MSFT", "AMZN", "GOOGL", "META",
-    "TSLA", "NVDA", "BRK-B", "V", "UNH"
-]
+STOCK_TICKERS = {
+    "AAPL": "apple",
+    "MSFT": "microsoft",
+    "AMZN": "amazon",
+    "GOOGL": "google",
+    "META": "meta",
+    "TSLA": "tesla",
+    "NVDA": "nvidia",
+    "V": "visa",
+    "UNH": "unitedhealth",
+    "PLTR" : "palantir",
+    "IREN" : "iren"
+}
 
 # 2) 섹터 뉴스 (ETF 기준)
 # → 산업 전반 분위기 파악 목적
@@ -106,6 +116,14 @@ def fetch_news_by_ticker(ticker: str, news_type: str) -> pd.DataFrame:
 
     rows = []
 
+    # 종목 이름 저장
+    if news_type == "stock":
+        company_name = STOCK_TICKERS.get(ticker, "")
+    elif news_type == "sector":
+        company_name = SECTOR_TICKERS.get(ticker, "")
+    else:
+        company_name = MARKET_TICKERS.get(ticker, "")
+
     # -----------------------------
     # Step 2. 뉴스 메타데이터 파싱
     # -----------------------------
@@ -115,18 +133,25 @@ def fetch_news_by_ticker(ticker: str, news_type: str) -> pd.DataFrame:
             content = item.get("content", {})
 
             headline = content.get("title", "")
-            if not headline:
+            headline_lower = headline.lower()
+
+            if (company_name.lower() not in headline_lower) and (ticker.lower() not in headline_lower):
                 continue
+            
 
             # 발행일 (ISO 문자열 → date)
             pub_date = content.get("pubDate", "")
             date = pd.to_datetime(pub_date, utc=True).date() if pub_date else None
+
+            if date is None:
+                continue
 
             source = content.get("provider", {}).get("displayName", "")
 
             rows.append({
                 "date": date,
                 "ticker": ticker,
+                "company_name": company_name,
                 "news_type": news_type,
                 "headline": headline,
                 # clean_headline은 전처리 단계에서 채운다
@@ -151,7 +176,21 @@ def fetch_news_by_ticker(ticker: str, news_type: str) -> pd.DataFrame:
     for r, c in zip(rows, cleaned_headlines):
         r["clean_headline"] = c
 
+    if news_type == "stock":
+        filtered = []
+        for r in rows:
+            text = r["clean_headline"].lower()
+            ticker_lower = ticker.lower()
+            name_lower = company_name.lower()
+
+            if ticker_lower in text or name_lower in text:
+                filtered.append(r)
+
+        rows = filtered
+
     return pd.DataFrame(rows, columns=NEWS_COLUMNS)
+
+
 
 
 def fetch_all_news(save_debug_csv: bool = False) -> pd.DataFrame:
@@ -171,9 +210,11 @@ def fetch_all_news(save_debug_csv: bool = False) -> pd.DataFrame:
     # 종목 뉴스 수집
     # -----------------------------
     print("\n[종목 뉴스 수집]")
-    for ticker in STOCK_TICKERS:
+    for ticker,name in STOCK_TICKERS.items():
         df = fetch_news_by_ticker(ticker, "stock")
+
         if not df.empty:
+            df["company_name"] = name
             all_news.append(df)
 
     # -----------------------------
@@ -199,6 +240,8 @@ def fetch_all_news(save_debug_csv: bool = False) -> pd.DataFrame:
 
     # 모든 뉴스 결합 후 최신순 정렬
     combined = pd.concat(all_news, ignore_index=True)
+    # 중복 제거
+    combined = combined.drop_duplicates(subset=['clean_headline'])
     combined = combined.sort_values("date", ascending=False).reset_index(drop=True)
 
     print(
@@ -232,4 +275,4 @@ if __name__ == "__main__":
     df_news = fetch_all_news(save_debug_csv=True)
 
     print("\n[미리보기]")
-    print(df_news.head(10))
+    print(df_news.head(50))
