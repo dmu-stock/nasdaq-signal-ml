@@ -27,16 +27,16 @@ class FeatureProcessor:
     def __init__(self, db_path: str = "stock_data.db"):
         self.db_path = db_path
 
-    def get_raw_data(self,ticker:str)->pd.DataFrame:
+    def get_raw_data(self)->pd.DataFrame:
         conn = get_connection()
-        query = f"SELECT * FROM stock_prices WHERE ticker = '{ticker}' ORDER BY date ASC"
+        query = f"SELECT * FROM stock_prices ORDER BY date ASC"
         df = pd.read_sql(query,conn)
         conn.close()
 
         return df
         
-    def calc_technical_indicators(self, df, ma1=5, ma2=20, rsi_period=14):
-        df = df.sort_values('date')
+    def calc_technical_indicators(self, df, rsi_period=14):
+        df = df.sort_values(['ticker','date']).reset_index(drop=True)
 
         # ---------------------------
         # 이동평균 (Trend)
@@ -60,24 +60,22 @@ class FeatureProcessor:
         # ---------------------------
         delta = df.groupby('ticker')['adj_close'].diff()
         # 상승, 하락분 분리
-        gain = delta.copy()
-        loss = delta.copy()
-        gain[gain < 0] = 0
-        loss[loss > 0] = 0
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
 
         avg_gain = (
             gain.groupby(df['ticker'])
-            .transform(lambda x : x.rolling(window=rsi_period).mean())
+            .transform(lambda x : x.rolling(rsi_period).mean())
         )
         
         avg_loss = (
-            loss.abs().groupby(df['ticker'])
-            .transform(lambda x : x.rolling(window=rsi_period).mean())
+            loss.groupby(df['ticker'])
+            .transform(lambda x : x.rolling(rsi_period).mean())
         )
 
         # RS(상대강도) 및 RSI 계산
         rs = avg_gain / (avg_loss + 1e-9)
-        df['rsi'] = 100.0 - (100.0 / (1.0 + rs))
+        df['rsi'] = 100 - (100 / (1 + rs))
 
         #이격도
         # df['disparity_20'] = (df['adj_close'] - df['ma20']) / df['ma20']
@@ -174,7 +172,7 @@ class FeatureProcessor:
     
 if __name__ == "__main__":
     processor = FeatureProcessor()
-    df = processor.get_raw_data("AAPL")
+    df = processor.get_raw_data()
     df = processor.calc_technical_indicators(df)
 
     today = datetime.now().strftime("%Y%m%d")
@@ -183,5 +181,13 @@ if __name__ == "__main__":
         index=False,
         encoding="utf-8-sig"
     )
-
+    print(df.shape)
+    print(
+    df[['ticker', 'date']].duplicated().sum()
+    )
+    print(
+        df[['ticker', 'date']]
+        .value_counts()
+        .head(20)
+    )
     print(df.head())
