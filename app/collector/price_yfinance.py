@@ -62,6 +62,9 @@ def get_nasdaq_data(period: str = "2y") ->  Optional[pd.DataFrame]:
     )
 
     nasdaq['nasdaq_change_rate'] = nasdaq['Adj Close'].pct_change()
+    # 날짜 기준 오름차순 정렬
+    nasdaq = nasdaq.sort_values(["ticker", "date"]).reset_index(drop=True)
+    
 
     return nasdaq[['Date', 'Adj Close', 'nasdaq_change_rate']].rename(columns={'Adj Close': 'nasdaq_close'})
 
@@ -141,7 +144,7 @@ def fetch_price_data(
         df = df.dropna()
 
         # 날짜 기준 오름차순 정렬
-        df = df.sort_values("date").reset_index(drop=True)
+        df = df.sort_values(["ticker", "date"]).reset_index(drop=True)
         
         return df
 
