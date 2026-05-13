@@ -21,10 +21,11 @@ news_crawler.py
 import yfinance as yf
 import finnhub
 import pandas as pd
-import datetime
-import time
+from datetime import time, datetime, timedelta
+import time as time_module
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
+import os
 
 # LLM 기반 헤드라인 전처리 함수
 # (단건 호출이 아닌 배치 호출로 API 비용/시간 절감)
@@ -33,6 +34,7 @@ from app.collector.headline_preprocessor import preprocess_headlines_batch
 
 # Finnhub 클라이언트 초기화
 API_KEY = os.getenv("FINNHUB_API_KEY")
+finnhub_client = finnhub.Client(api_key=API_KEY)
 # -------------------------------------------------
 # 반환 DataFrame 컬럼 정의
 # (항상 동일한 구조를 유지하기 위함)
@@ -132,8 +134,8 @@ def fetch_finnhub_news(ticker, start_date, end_date):
     start_date, end_date: 'YYYY-MM-DD' 형식
     """
     # 1. 날짜 변환
-    s_date = datetime.datetime.strptime(start_date, '%Y-%m-%d')
-    e_date = datetime.datetime.strptime(end_date, '%Y-%m-%d')
+    s_date = datetime.strptime(start_date, '%Y-%m-%d')
+    e_date = datetime.strptime(end_date, '%Y-%m-%d')
 
     # 3개월씩 쪼개기
     date_ranges = pd.date_range(start=s_date, end=e_date, freq='3MS')
@@ -156,18 +158,39 @@ def fetch_finnhub_news(ticker, start_date, end_date):
                     "source": item['source']
                 })
             # API 호출 제한 방지 (무료 플랜 기준 1초당 호출 제한)
-            time.sleep(1) 
+            time_module.sleep(1) 
         except Exception as e:
             print(f"[에러] {ticker} 수집 실패: {e}")
             
-    return pd.DataFrame(all_news)
+    rows = []
+    for item in news:
+        # 1. Unix Timestamp -> KST 변환
+        pub_time = pd.to_datetime(item['datetime'], unit='s', utc=True).tz_convert('Asia/Seoul')
+        
+        # 2. 기존에 잘 짜두었던 세션 분류 로직 적용
+        session = get_predictive_session(pub_time) # 지호님 기존 함수 호출
+        
+        # 3. 매칭용 target_date 계산 (22시 이후면 다음 날로 보정)
+        target_date = pub_time.date()
+        if session == "PREDICT_TOMORROW" and pub_time.hour >= 22:
+            target_date = pub_time.date() + timedelta(days=1)
+            
+        rows.append({
+            "date": target_date,          # 매칭을 위한 기준 날짜
+            "pub_datetime": pub_time,     # 실제 발행 시각
+            "session": session,           # PREDICT_TONIGHT or TOMORROW
+            "ticker": ticker,
+            "headline": item['headline'],
+            "source": item['source']
+        })
+    return pd.DataFrame(rows)
 
 def run_collection(tickers):
     """
     모든 티커에 대해 3년 치 뉴스 수집 및 저장
     """
     start_date = "2023-05-13" # 3년 전
-    end_date = datetime.datetime.now().strftime('%Y-%m-%d')
+    end_date = datetime.now().strftime('%Y-%m-%d')
     
     total_data = []
     for ticker in tickers:
