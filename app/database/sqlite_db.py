@@ -19,7 +19,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS stock_prices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ticker TEXT NOT NULL,   -- 티커명
-        date TEXT NOT NULL,     -- 날짜  
+        date TEXT NOT NULL,     -- 날짜
         open REAL,              -- 시가(장 시작 시 가격)
         high REAL,              -- 고가
         low REAL,               -- 저가
@@ -46,10 +46,10 @@ def save_price_to_db(df:pd.DataFrame):
         if conn is None:
             print("DB 연결 실패")
             return
-        
+
         try:
             df.to_sql('stock_prices', conn, if_exists='append', index=False, chunksize=1000)
             print(f"DB 저장 성공: {len(df)}건")
         except Exception as e:
             print(f"DB 저장 에러: {e}")
-    
+

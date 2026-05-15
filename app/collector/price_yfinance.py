@@ -25,16 +25,63 @@ from app.database.sqlite_db import save_price_to_db
 # (Yahoo Finance 티커 기준)
 # -------------------------------------------------
 BLUE_CHIP_STOCKS = [
-    "AAPL",   # Apple
-    "MSFT",   # Microsoft
-    "AMZN",   # Amazon
-    "GOOGL",  # Alphabet (Google)
-    "META",   # Meta Platforms
-    "TSLA",   # Tesla
-    "NVDA",   # NVIDIA
-    "BRK-B",  # Berkshire Hathaway (B주)
-    "V",      # Visa
-    "UNH",    # UnitedHealth Group
+
+    # Big Tech
+    "AAPL",    # Apple
+    "MSFT",    # Microsoft
+    "AMZN",    # Amazon
+    "GOOGL",   # Alphabet
+    "META",    # Meta
+    "NVDA",    # NVIDIA
+    "TSLA",    # Tesla
+
+    # Semiconductor
+    "AMD",     # AMD
+    "AVGO",    # Broadcom
+    "QCOM",    # Qualcomm
+    "INTC",    # Intel
+    "MU",      # Micron
+
+    # Finance
+    "JPM",     # JPMorgan
+    "BAC",     # Bank of America
+    "GS",      # Goldman Sachs
+    "MS",      # Morgan Stanley
+    "V",       # Visa
+    "MA",      # Mastercard
+
+    # Healthcare
+    "UNH",     # UnitedHealth
+    "JNJ",     # Johnson & Johnson
+    "PFE",     # Pfizer
+    "LLY",     # Eli Lilly
+    "MRK",     # Merck
+
+    # Consumer
+    "WMT",     # Walmart
+    "COST",    # Costco
+    "KO",      # Coca-Cola
+    "PEP",     # Pepsi
+    "MCD",     # McDonald's
+    "NKE",     # Nike
+
+    # Industrial
+    "CAT",     # Caterpillar
+    "GE",      # General Electric
+    "HON",     # Honeywell
+    "BA",      # Boeing
+
+    # Energy
+    "XOM",     # Exxon Mobil
+    "CVX",     # Chevron
+
+    # Communication / Entertainment
+    "NFLX",    # Netflix
+    "DIS",     # Disney
+
+    # ETFs
+    "SPY",     # S&P500 ETF
+    "QQQ",     # Nasdaq ETF
 ]
 
 def get_nasdaq_data(period: str = "2y") ->  Optional[pd.DataFrame]:
@@ -63,7 +110,16 @@ def get_nasdaq_data(period: str = "2y") ->  Optional[pd.DataFrame]:
 
     nasdaq['nasdaq_change_rate'] = nasdaq['Adj Close'].pct_change()
 
-    return nasdaq[['Date', 'Adj Close', 'nasdaq_change_rate']].rename(columns={'Adj Close': 'nasdaq_close'})
+    nasdaq=nasdaq.rename(columns={
+            'Date': 'date',
+            'Adj Close': 'nasdaq_close'
+            })
+    
+    # 날짜 기준 오름차순 정렬
+    nasdaq = nasdaq.sort_values(["date"]).reset_index(drop=True)
+    
+
+    return nasdaq[['date', 'nasdaq_close', 'nasdaq_change_rate']]
 
 
 def fetch_price_data(
@@ -103,7 +159,7 @@ def fetch_price_data(
 
         # 타임존 제거 및 date 타입으로 변환
         # (CSV 저장, 병합 시 오류 방지 목적)
-        df["Date"] = (
+        df["date"] = (
             pd.to_datetime(df["Date"])
             .dt.tz_localize(None)
             .dt.date
@@ -112,9 +168,10 @@ def fetch_price_data(
         # 등락률 컬럼 추가
         df['change_rate'] = df.groupby('ticker')['Adj Close'].pct_change()
 
+        
         # 나스닥 데이터와 날짜 기준으로 병합 (Left Join)
-        df = pd.merge(df, nasdaq_df, on='Date', how='left')
-
+        df = pd.merge(df, nasdaq_df, on='date', how='left')
+        
         # 시장 변화율 - 종목 등락률
         # 값 > 0 → 시장보다 강함
         df['alpha'] = df['change_rate'] - df['nasdaq_change_rate']
@@ -122,7 +179,6 @@ def fetch_price_data(
         df = df.dropna()
 
         df = df.rename(columns={
-            "Date": "date",
             "Open": "open",
             "High": "high",
             "Low": "low",
@@ -130,6 +186,8 @@ def fetch_price_data(
             "Adj Close": "adj_close",
             "Volume": "volume"
         })
+
+        
 
         # 분석에 필요한 컬럼만 선택
         # (Dividends, Stock Splits 등은 제거)
@@ -141,7 +199,7 @@ def fetch_price_data(
         df = df.dropna()
 
         # 날짜 기준 오름차순 정렬
-        df = df.sort_values("date").reset_index(drop=True)
+        df = df.sort_values(["ticker", "date"]).reset_index(drop=True)
         
         return df
 
@@ -153,7 +211,7 @@ def fetch_price_data(
 
 def fetch_all_stocks_price_data(
     tickers: List[str] = BLUE_CHIP_STOCKS,
-    period: str = "2y"
+    period: str = "3y"
 ) -> pd.DataFrame:
     """
     여러 종목의 주가 데이터를 일괄 수집하여 하나의 DataFrame으로 결합한다.
@@ -222,6 +280,7 @@ def save_to_csv(df: pd.DataFrame, filename: str) -> None:
 # -------------------------------------------------
 if __name__ == "__main__":
     # 전체 종목 가격 데이터 수집
+    nasdaq_df=get_nasdaq_data()
     df_prices = fetch_all_stocks_price_data()
     if df_prices is not None and not df_prices.empty:
         # db 저장(학습 데이터용)
@@ -232,6 +291,16 @@ if __name__ == "__main__":
         print(f"\n수집 기간: {df_prices['date'].min()} ~ {df_prices['date'].max()}")
         print(f"종목 수: {df_prices['ticker'].nunique()}")
         print(f"총 데이터 수: {len(df_prices)}")
+
+        print(
+            df_prices.loc[495:505,
+            ['date', 'ticker', 'adj_close']]
+        )
+        print(
+            df_prices.groupby(['ticker', 'date']).size()
+            .sort_values(ascending=False)
+            .head(20)
+        )   
 
         # CSV 저장 (검증/공유용)
         save_to_csv(df_prices, "bluechip_price_data.csv")

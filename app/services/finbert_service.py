@@ -43,7 +43,7 @@ class FinBertSentimentAnalyzer:
                 sentiment_score = -confidence
 
             else:  # Neutral
-                sentiment_score = 0.0
+                sentiment_score = confidence * 0.15
 
             analyzed_results.append({
                 "label": label,
@@ -63,8 +63,8 @@ class FinBertSentimentAnalyzer:
 
             if c["label"] == "Neutral":
                 score = r["sentiment_score"]
-
-            score = (r["sentiment_score"] * 0.8) + (c["sentiment_score"] * 0.2)
+            else:
+                score = (r["sentiment_score"] * 0.8) + (c["sentiment_score"] * 0.2)
             final_scores.append(round(score, 4))
         
         return final_scores, raw_results
