@@ -26,6 +26,7 @@ import time as time_module
 from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 import os
+import requests
 
 # LLM 기반 헤드라인 전처리 함수
 # (단건 호출이 아닌 배치 호출로 API 비용/시간 절감)
@@ -128,81 +129,7 @@ MARKET_TICKERS = {
     "SPY": "us_market",
     "QQQ": "tech_market"
 }
-def fetch_finnhub_news(ticker, start_date, end_date):
-    """
-    Finnhub을 이용해 과거 뉴스 데이터를 수집
-    start_date, end_date: 'YYYY-MM-DD' 형식
-    """
-    # 1. 날짜 변환
-    s_date = datetime.strptime(start_date, '%Y-%m-%d')
-    e_date = datetime.strptime(end_date, '%Y-%m-%d')
 
-    # 3개월씩 쪼개기
-    date_ranges = pd.date_range(start=s_date, end=e_date, freq='3MS')
-    all_news = []
-    
-    for i in range(len(date_ranges)-1):
-        s = date_ranges[i].strftime('%Y-%m-%d')
-        e = date_ranges[i+1].strftime('%Y-%m-%d')
-        
-        try:
-            # Finnhub 호출
-            news = finnhub_client.company_news(ticker, _from=s, to=e)
-            if not news: continue
-            
-            for item in news:
-                all_news.append({
-                    "date": pd.to_datetime(item['datetime'], unit='s').date(),
-                    "ticker": ticker,
-                    "headline": item['headline'],
-                    "source": item['source']
-                })
-            # API 호출 제한 방지 (무료 플랜 기준 1초당 호출 제한)
-            time_module.sleep(1) 
-        except Exception as e:
-            print(f"[에러] {ticker} 수집 실패: {e}")
-            
-    rows = []
-    for item in news:
-        # 1. Unix Timestamp -> KST 변환
-        pub_time = pd.to_datetime(item['datetime'], unit='s', utc=True).tz_convert('Asia/Seoul')
-        
-        # 2. 기존에 잘 짜두었던 세션 분류 로직 적용
-        session = get_predictive_session(pub_time) # 지호님 기존 함수 호출
-        
-        # 3. 매칭용 target_date 계산 (22시 이후면 다음 날로 보정)
-        target_date = pub_time.date()
-        if session == "PREDICT_TOMORROW" and pub_time.hour >= 22:
-            target_date = pub_time.date() + timedelta(days=1)
-            
-        rows.append({
-            "date": target_date,          # 매칭을 위한 기준 날짜
-            "pub_datetime": pub_time,     # 실제 발행 시각
-            "session": session,           # PREDICT_TONIGHT or TOMORROW
-            "ticker": ticker,
-            "headline": item['headline'],
-            "source": item['source']
-        })
-    return pd.DataFrame(rows)
-
-def run_collection(tickers):
-    """
-    모든 티커에 대해 3년 치 뉴스 수집 및 저장
-    """
-    start_date = "2023-05-13" # 3년 전
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    
-    total_data = []
-    for ticker in tickers:
-        print(f"[진행] {ticker} 데이터 수집 중...")
-        df = fetch_finnhub_news(ticker, start_date, end_date)
-        total_data.append(df)
-        
-    final_df = pd.concat(total_data, ignore_index=True)
-    final_df.to_csv("historical_news_data.csv", index=False, encoding="utf-8-sig")
-    print("완료: historical_news_data.csv 저장됨")
-
-############################################################################################
 def get_predictive_session(pub_time):
     """
     뉴스가 발생한 시간을 기준으로, 
@@ -213,13 +140,76 @@ def get_predictive_session(pub_time):
     
     # 더 직관적인 방법:
     # 한국 시간 05:00 ~ 22:30 사이에 발생한 뉴스는
-    # '오늘 밤 22:30에 시작되는 본장'의 예측에 반영합니다.
+    # '오늘 밤 22:30에 시작되는 본장'의 예측에 반영.
     
     # 05:00 ~ 22:30 사이인가?
     if time(5, 0) <= pub_time.time() < time(22, 30):
         return "PREDICT_TONIGHT" # 오늘 밤 본장 예측용
     else:
         return "PREDICT_TOMORROW" # 내일 밤 본장 예측용
+    
+    ############################################################################################
+
+def fetch_alpha_vantage_news(topics, start_date, end_date, api_key, file_name):
+    base_url = "https://www.alphavantage.co/query"
+    new_news = []
+
+    params = {
+        "function": "NEWS_SENTIMENT",
+        "topics": topics,
+        "time_from": start_date,
+        "time_to": end_date,
+        "limit": 1000,
+        "apikey": api_key
+    }
+
+    try:
+        response = requests.get(base_url, params=params)
+        data = response.json()
+
+        if "feed" not in data:
+            print(f"{topics}: 데이터를 가져오지 못했습니다. ({data.get('Note', '제한 가능성')})")
+            return None
+
+        for item in data["feed"]:
+            dt_str = item['time_published']
+            pub_time = pd.to_datetime(dt_str, format='%Y%m%dT%H%M%S').tz_localize('UTC').tz_convert('Asia/Seoul')
+            
+            new_news.append({
+                "date": pub_time.strftime('%Y-%m-%d'),
+                "pub_datetime": pub_time.strftime('%Y-%m-%d %H:%M:%S%z'),
+                "ticker": topics, # topics를 ticker 컬럼에 넣어 구분 (예: economy_macro)
+                "title": item['title'],
+                "source": item['source'],
+                "content": item.get('summary', '').replace('\n', ' ').strip()
+            })
+
+        # 새로운 데이터프레임 생성
+        new_df = pd.DataFrame(new_news)
+
+        # 기존 파일이 있으면 불러와서 합치기
+        if os.path.exists(file_name):
+            old_df = pd.read_csv(file_name)
+            # 합치기
+            combined_df = pd.concat([old_df, new_df], ignore_index=True)
+            # 제목과 발행시간 기준 중복 제거 (매우 중요!)
+            combined_df.drop_duplicates(subset=['title', 'pub_datetime'], inplace=True)
+            print(f"기존 데이터와 합쳤습니다. (총 {len(combined_df)}행)")
+        else:
+            combined_df = new_df
+            print(f"새 파일을 생성합니다. ({len(combined_df)}행)")
+
+        # 날짜순 정렬 (모델 학습을 위해 미리 정렬)
+        combined_df = combined_df.sort_values(by=['pub_datetime'], ascending=True)
+
+        combined_df.to_csv(file_name, index=False, encoding="utf-8-sig")
+        return combined_df # 절대로 None을 주지 않고 DataFrame을 줌
+
+    except Exception as e:
+        print(f"[에러] {topics} 수집 중 오류: {e}")
+
+    return pd.DataFrame()
+
 
 def fetch_news_by_ticker(ticker: str, news_type: str) -> pd.DataFrame:
     """
@@ -447,5 +437,21 @@ if __name__ == "__main__":
 
     # print("\n[미리보기]")
     # print(df_news.head(50))
-    target_tickers = ["AAPL", "MSFT", "NVDA", "TSLA", "AMD"] # 테스트용 일부
-    run_collection(target_tickers)
+    # target_tickers = ["SPY", "QQQ", "VIX", "IWM"] # 테스트용 일부
+    # run_collection(target_tickers)
+    API_KEY = "30WWBWLK2F3JVRN3"
+    target_tickers = ["SPY", "QQQ"]
+    topics = "economy_macro"
+    # Alpha Vantage는 YYYYMMDDTHHMM 형식을 사용
+    s_dt = "20250916T0000"
+    e_dt = "20250931T2359"
+
+    new_data_df = fetch_alpha_vantage_news(topics, s_dt, e_dt, API_KEY,"vintage.csv")
+    if new_data_df is not None:
+        if not new_data_df.empty:
+            print(f"수집 및 저장 완료 현재 데이터: {len(new_data_df)}행")
+        else:
+            print("호출은 성공, 수집된 새로운 데이터가 없습니다.")
+    else:
+        print("함수가 None을 리턴. API 제한이나 코드 내부 에러를 확인하세요.")
+    
