@@ -160,8 +160,12 @@ class FeatureProcessor:
             .shift(-5) / df['adj_close'] - 1
         )
         # 분류 (노이즈 제거)
-        df['label'] = (df['target_5'] > 0.02).astype(int)
-        print(df['label'].value_counts(normalize=True))
+        # df['label'] = (df['target_5'] > 0.02).astype(int)
+        # print(df['label'].value_counts(normalize=True))
+
+        # 내일부터 3일 이내에 '종가 기준'으로 한 번이라도 2.5% 이상 상승하면 1, 아니면 0
+        df['future_max_close_3d'] = df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(3, min_periods=1).max().shift(-3))
+        df['label'] = np.where((df['future_max_close_3d'] - df['adj_close']) / df['adj_close'] >= 0.025, 1, 0)
 
         # 최고가 대비 하락률 (High Drawdown)
         df['max_20'] = df.groupby('ticker')['high'].transform(lambda x: x.rolling(20).max())
@@ -189,37 +193,33 @@ class FeatureProcessor:
             .pct_change()
         )
         
-        df = df.dropna().reset_index(drop=True)
+        check_cols = ['rsi', 'macd_hist', 'bb_percent', 'volatility_5', 'log_return', 'volume_change', 'label']
+        df = df.dropna(subset=check_cols).reset_index(drop=True)
+
+        window_size = 5 
+        df = df.groupby('ticker').filter(lambda x: len(x) >= window_size).reset_index(drop=True)
 
         meta_cols = ['ticker', 'date']
         feature_cols = [
-
-        # 가격
-        'open',
-        'high',
-        'low',
-        'adj_close',
-
-        # 거래량
-        'volume',
-
-        # 가격 변화
-        'change_rate',
-        'log_return',
-
-        # candle
-        'candle_body',
-        'high_low_spread',
-
-         # indicator
-        'rsi',
-        'macd_hist',
-        'bb_percent',
-        'volatility_5',
-        # market
-        'nasdaq_change_rate',
-        
-        'label'
+            # 1. 가격의 변화율 및 캔들 모양 (이미 0을 기준으로 정규화된 형태)
+            'change_rate',
+            'log_return',
+            'candle_body',
+            'high_low_spread',
+            
+            # 2. 거래량 지표 (Raw volume은 절대 금지, 비율로 치환된 것만 사용)
+            'volume_ratio',
+            'volume_change',
+            
+            # 3. 보조지표 (0~1 사이 혹은 스케일이 안정적인 녀석들)
+            'bb_percent',     # 0~1 사이 값이라 LSTM이 환장하고 좋아함
+            'volatility_5',   # 변동성 크기 표준편차
+            'drawdown_20',     # 최고점 대비 낙폭 비율 (-0.1, -0.2 등)
+            'macd_hist',      # 단기 에너지
+            
+            # 4. 시장 리스크 및 타겟
+            'nasdaq_change_rate',
+            'label'
         ]
         df = df[meta_cols + feature_cols]
 

@@ -11,7 +11,7 @@ m2 = lstm_res[['date', 'ticker', 'pred_prob']].rename(columns={'pred_prob': 'pro
 ensemble_df = pd.merge(m1, m2, on=['date', 'ticker'], how='inner')
 
 # 3. 두 모델의 확률 합치기 
-ensemble_df['final_prob'] = (ensemble_df['prob_lgb'] * 0.8) + (ensemble_df['prob_lstm'] * 0.5)
+ensemble_df['final_prob'] = (ensemble_df['prob_lgb'] * 0.6) + (ensemble_df['prob_lstm'] * 0.4)
 
 # 합쳐진 점수를 기준으로 다시 Top 50 뽑아서 성능 확인해보기
 top_50_ensemble = ensemble_df.sort_values(by='final_prob', ascending=False).drop_duplicates(subset=['ticker']).head(50)
