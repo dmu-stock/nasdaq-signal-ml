@@ -1,69 +1,64 @@
+from xgboost import XGBClassifier
 import pandas as pd
-import os
-from lightgbm import LGBMClassifier
+
 from sklearn.metrics import (
-    classification_report,
-    accuracy_score,
-    roc_auc_score
+classification_report,
+accuracy_score,
+roc_auc_score,
 )
 
 # -----------------------------
+
 # 데이터 로드
+
 # -----------------------------
+
 df_tech = pd.read_csv("feature__indicator20260518.csv")
-# df_news = pd.read_csv("news_sentiment_20260513.csv")
 
-# final_df = pd.merge(df_tech,[['ticker', 'date', 'sentiment_score']],on=['ticker', 'date'], how='left')
-
-# final_df['sentiment_score'] = final_df['sentiment_score'].fillna(0)
-
-# 날짜 타입 변환
 df_tech['date'] = pd.to_datetime(df_tech['date'])
-# final_df = final_df[abs(final_df['sentiment_score'] - 0.15) > 0.05]
 
 # -----------------------------
+
 # Feature 선택
+
 # -----------------------------
+
 feature_cols = [
-    # 'change_rate',
-    # 'return_5',
 
-    'alpha',
-    'alpha_5',
-    'alpha_20',
-    'alpha_divergence',
+'return_5',
 
-    'ma_ratio',
+'alpha',
+'alpha_5',
+'alpha_20',
+'alpha_divergence',
 
-    'rsi',
-    'volatility_5',
+'ma_ratio',
 
-    'volume_ratio',
+'rsi',
+'volatility_5',
 
-    'nasdaq_change_rate',
+'volume_ratio',
 
-    #심리도
-    # 'psychological',
+'nasdaq_change_rate',
 
-            #macd
-    'macd_hist',
-    
-    #최고가 대비 하락률
-    'drawdown_20',
+'macd_hist',
 
-    'bb_percent',
+'drawdown_20',
 
-    # 5일간의 고가 - 저가 평균 (종목의 활동성)
-    'tr_5'
+'bb_percent',
+
+'tr_5'
 
 ]
 
 target_col = 'label'
 
 # -----------------------------
+
 # Train / Test Split
-# 시계열이라 날짜 기준 분리
+
 # -----------------------------
+
 train = df_tech[df_tech['date'] < '2025-07-01']
 test = df_tech[df_tech['date'] >= '2025-07-01']
 
@@ -74,49 +69,62 @@ X_test = test[feature_cols]
 y_test = test[target_col]
 
 print(f"Train Size: {len(train)}")
-print(f"Test Size: {len(test)}")
+print(f"Test Size : {len(test)}")
 
 # -----------------------------
-# LightGBM 모델 생성
+
+# XGBoost 모델
+
 # -----------------------------
-model = LGBMClassifier(
-    objective='binary',
-    boosting_type='gbdt',
+
+model = XGBClassifier(
+    objective='binary:logistic',
 
     n_estimators=300,
-    learning_rate=0.01,
+    learning_rate=0.03,
 
     max_depth=5,
-    num_leaves=31,
-    min_data_in_leaf= 50,
-    feature_fraction= 0.8,
-    force_col_wise= True,
+
     subsample=0.8,
     colsample_bytree=0.8,
 
     random_state=42,
-    class_weight='balanced',
-    verbose= -1,
+
+    eval_metric='logloss',
+
+    scale_pos_weight=(
+        (y_train == 0).sum() / (y_train == 1).sum()
+    )
 )
 
 # -----------------------------
+
 # 학습
+
 # -----------------------------
+
 model.fit(X_train, y_train)
 
 # -----------------------------
-# 예측
-# -----------------------------
-pred = model.predict(X_test)
 
-# 상승 확률
+# 확률 예측
+
+# -----------------------------
+
 pred_prob = model.predict_proba(X_test)[:, 1]
+
+# threshold tuning
+
 threshold = 0.55
+
 pred = (pred_prob >= threshold).astype(int)
 
 # -----------------------------
+
 # 평가
+
 # -----------------------------
+
 print("\n===== Classification Report =====")
 print(classification_report(y_test, pred))
 
@@ -124,25 +132,36 @@ print(f"Accuracy : {accuracy_score(y_test, pred):.4f}")
 print(f"ROC-AUC  : {roc_auc_score(y_test, pred_prob):.4f}")
 
 # -----------------------------
+
 # Feature Importance
+
 # -----------------------------
+
 importance_df = pd.DataFrame({
-    'feature': feature_cols,
-    'importance': model.feature_importances_
+'feature': feature_cols,
+'importance': model.feature_importances_
 }).sort_values(by='importance', ascending=False)
 
 print("\n===== Feature Importance =====")
 print(importance_df)
 
 # -----------------------------
+
 # 예측 결과 저장
+
 # -----------------------------
+
 result_df = test[['ticker', 'date']].copy()
 
 result_df['actual'] = y_test.values
 result_df['pred'] = pred
 result_df['pred_prob'] = pred_prob
 
-result_df.to_csv("prediction_result.csv", index=False)
+result_df = result_df.sort_values(
+by='pred_prob',
+ascending=False
+)
 
-print("\nprediction_result.csv 저장 완료")
+result_df.to_csv("xgboost_prediction_result.csv", index=False)
+
+print("\nxgboost_prediction_result.csv 저장 완료")

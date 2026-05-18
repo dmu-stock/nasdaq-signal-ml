@@ -42,8 +42,8 @@ finnhub_client = finnhub.Client(api_key=API_KEY)
 # -------------------------------------------------
 NEWS_COLUMNS = [
     "date",           # 뉴스 발행 날짜
-    "pub_datetime",     
-    "session",         
+    "pub_datetime",
+    "session",
     "ticker",         # 티커 (종목 / 섹터 ETF / 시장 ETF)
     "company_name",
     "news_type",      # stock / sector / market
@@ -132,22 +132,22 @@ MARKET_TICKERS = {
 
 def get_predictive_session(pub_time):
     """
-    뉴스가 발생한 시간을 기준으로, 
+    뉴스가 발생한 시간을 기준으로,
     어떤 본장 예측에 기여할지 결정합니다.
     """
     # 1. KST -> UTC로 변환 (미국 주식 시장은 UTC 기준이 편함)
     # 2. 뉴스가 '전날 05:00 ~ 오늘 05:00' 사이인지 판별 등 로직 적용
-    
+
     # 더 직관적인 방법:
     # 한국 시간 05:00 ~ 22:30 사이에 발생한 뉴스는
     # '오늘 밤 22:30에 시작되는 본장'의 예측에 반영.
-    
+
     # 05:00 ~ 22:30 사이인가?
     if time(5, 0) <= pub_time.time() < time(22, 30):
         return "PREDICT_TONIGHT" # 오늘 밤 본장 예측용
     else:
         return "PREDICT_TOMORROW" # 내일 밤 본장 예측용
-    
+
     ############################################################################################
 
 def fetch_alpha_vantage_news(topics, start_date, end_date, api_key, file_name):
@@ -160,7 +160,8 @@ def fetch_alpha_vantage_news(topics, start_date, end_date, api_key, file_name):
         "time_from": start_date,
         "time_to": end_date,
         "limit": 1000,
-        "apikey": api_key
+        "apikey": api_key,
+        "sort" : "EARLIEST"
     }
 
     try:
@@ -174,7 +175,7 @@ def fetch_alpha_vantage_news(topics, start_date, end_date, api_key, file_name):
         for item in data["feed"]:
             dt_str = item['time_published']
             pub_time = pd.to_datetime(dt_str, format='%Y%m%dT%H%M%S').tz_localize('UTC').tz_convert('Asia/Seoul')
-            
+
             new_news.append({
                 "date": pub_time.strftime('%Y-%m-%d'),
                 "pub_datetime": pub_time.strftime('%Y-%m-%d %H:%M:%S%z'),
@@ -284,7 +285,7 @@ def fetch_news_by_ticker(ticker: str, news_type: str) -> pd.DataFrame:
             #company_name과 ticker가 없으면 continue
             # if (company_name.lower() not in headline_lower) and (ticker.lower() not in headline_lower):
             #     continue
-            
+
 
             # 발행일 (ISO 문자열 → datetime)
             pub_date = content.get("pubDate", "")
@@ -439,14 +440,15 @@ if __name__ == "__main__":
     # print(df_news.head(50))
     # target_tickers = ["SPY", "QQQ", "VIX", "IWM"] # 테스트용 일부
     # run_collection(target_tickers)
-    API_KEY = "30WWBWLK2F3JVRN3"
-    target_tickers = ["SPY", "QQQ"]
-    topics = "economy_macro"
-    # Alpha Vantage는 YYYYMMDDTHHMM 형식을 사용
-    s_dt = "20250916T0000"
-    e_dt = "20250931T2359"
 
-    new_data_df = fetch_alpha_vantage_news(topics, s_dt, e_dt, API_KEY,"vintage.csv")
+    API_KEY = "VXTXTYN6MNB2OGQ8"
+    target_tickers = ["SPY", "QQQ"]
+    topics = "financial_markets"
+    # Alpha Vantage는 YYYYMMDDTHHMM 형식을 사용
+    s_dt = "20250523T0000"
+    e_dt = "20250531T2359"
+
+    new_data_df = fetch_alpha_vantage_news(topics, s_dt, e_dt, API_KEY,"vintage_2025.csv")
     if new_data_df is not None:
         if not new_data_df.empty:
             print(f"수집 및 저장 완료 현재 데이터: {len(new_data_df)}행")
@@ -454,4 +456,3 @@ if __name__ == "__main__":
             print("호출은 성공, 수집된 새로운 데이터가 없습니다.")
     else:
         print("함수가 None을 리턴. API 제한이나 코드 내부 에러를 확인하세요.")
-    

@@ -160,60 +160,66 @@ class FeatureProcessor:
             .shift(-5) / df['adj_close'] - 1
         )
         # 분류 (노이즈 제거)
-        df['label'] = (df['target_5'] > 0.03).astype(int)
+        df['label'] = (df['target_5'] > 0.02).astype(int)
         print(df['label'].value_counts(normalize=True))
 
         # 최고가 대비 하락률 (High Drawdown)
         df['max_20'] = df.groupby('ticker')['high'].transform(lambda x: x.rolling(20).max())
         df['drawdown_20'] = (df['adj_close'] - df['max_20']) / df['max_20']
+
+        # 로그수익률
+        df['log_return'] = (
+            np.log(df['adj_close'])
+            - np.log(df.groupby('ticker')['adj_close'].shift(1))
+        )
+
+        # 캔들 길이
+        df['candle_body'] = (
+            (df['adj_close'] - df['open']) / df['open']
+        )
+
+        # 위아래 꼬리 포함 변동폭
+        df['high_low_spread'] = (
+            (df['high'] - df['low']) / df['adj_close']
+        )
+
+        # 거래량 변화율
+        df['volume_change'] = (
+            df.groupby('ticker')['volume']
+            .pct_change()
+        )
         
         df = df.dropna().reset_index(drop=True)
 
         meta_cols = ['ticker', 'date']
         feature_cols = [
-            # 모멘텀
-            'change_rate',
-            'return_1',
-            'return_5',
-            #이격도
-            'disparity_20',
 
-            # 시장 상대 강도
-            'alpha',
-            'alpha_5',
-            'alpha_20',
-            'alpha_divergence',
+        # 가격
+        'open',
+        'high',
+        'low',
+        'adj_close',
 
-            # 이동평균
-            'ma_ratio',
-            'price_ma20',
+        # 거래량
+        'volume',
 
-            # RSI / 변동성
-            'rsi',
-            'volatility_5',
+        # 가격 변화
+        'change_rate',
+        'log_return',
 
-            #볼린저
-            'bb_percent',
+        # candle
+        'candle_body',
+        'high_low_spread',
 
-            #심리도
-            'psychological',
-
-            #macd
-            'macd_hist',
-
-            # 거래량
-            'volume_ratio',
-
-            #최고가 대비 하락률
-            'drawdown_20',
-
-            # 시장
-            'nasdaq_change_rate',
-
-            # 타겟
-            'label',
-            # 5일간의 고가 - 저가 평균 (종목의 활동성)
-            'tr_5'
+         # indicator
+        'rsi',
+        'macd_hist',
+        'bb_percent',
+        'volatility_5',
+        # market
+        'nasdaq_change_rate',
+        
+        'label'
         ]
         df = df[meta_cols + feature_cols]
 
@@ -228,7 +234,7 @@ if __name__ == "__main__":
 
     today = datetime.now().strftime("%Y%m%d")
     df.to_csv(
-        f"feature__indicator{today}.csv",
+        f"feature__indicator_lstm{today}.csv",
         index=False,
         encoding="utf-8-sig"
     )

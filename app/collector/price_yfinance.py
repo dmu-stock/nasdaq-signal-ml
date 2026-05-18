@@ -84,7 +84,7 @@ BLUE_CHIP_STOCKS = [
     "QQQ",     # Nasdaq ETF
 ]
 
-def get_nasdaq_data(period: str = "2y") ->  Optional[pd.DataFrame]:
+def get_nasdaq_data(period: str = "4y") ->  Optional[pd.DataFrame]:
     nasdaq = yf.download(
         "^IXIC",
         period=period, 
@@ -125,7 +125,7 @@ def get_nasdaq_data(period: str = "2y") ->  Optional[pd.DataFrame]:
 def fetch_price_data(
     ticker: str,
     nasdaq_df,
-    period: str = "2y",
+    period: str = "4y",
     interval: str = "1d"
 ) -> Optional[pd.DataFrame]:
     
