@@ -164,14 +164,33 @@ class FeatureProcessor:
         # print(df['label'].value_counts(normalize=True))
 
         # 내일부터 3일 이내에 '종가 기준'으로 한 번이라도 2.5% 이상 상승하면 1, 아니면 0
-        df['future_max_close_3d'] = df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(3, min_periods=1).max().shift(-3))
-        df['label'] = np.where((df['future_max_close_3d'] - df['adj_close']) / df['adj_close'] >= 0.025, 1, 0)
+        # df['future_max_close_3d'] = df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(3, min_periods=1).max().shift(-3))
+        # df['label'] = np.where((df['future_max_close_3d'] - df['adj_close']) / df['adj_close'] >= 0.025, 1, 0)
+        # ---------------------------------------------------
+        # 일반인 어플 최적화: 미래 3영업일 '종가' 기준 라벨링
+        # ---------------------------------------------------
+
+        # 1. 내일 종가(t1), 모레 종가(t2), 글피 종가(t3)를 미래에서 정확히 당겨오기
+        df['close_t1'] = df.groupby('ticker')['adj_close'].shift(-1)
+        df['close_t2'] = df.groupby('ticker')['adj_close'].shift(-2)
+        df['close_t3'] = df.groupby('ticker')['adj_close'].shift(-3)
+
+        # 2. 오늘 종가(adj_close) 대비 미래 각 영업일 종가의 수익률 계산
+        df['return_t1'] = (df['close_t1'] - df['adj_close']) / df['adj_close']
+        df['return_t2'] = (df['close_t2'] - df['adj_close']) / df['adj_close']
+        df['return_t3'] = (df['close_t3'] - df['adj_close']) / df['adj_close']
+
+        # 3. 미래 3일의 '종가 기준 최고 수익률'만 쏙 뽑아내기
+        df['max_return_3d'] = df[['return_t1', 'return_t2', 'return_t3']].max(axis=1)
+
+        # 4. 라벨링: 3일 중 한 번이라도 종가 기준으로 +2.5% 이상 올랐으면 1, 아니면 0
+        df['label'] = np.where(df['max_return_3d'] >= 0.025, 1, 0)
 
         # 최고가 대비 하락률 (High Drawdown)
         df['max_20'] = df.groupby('ticker')['high'].transform(lambda x: x.rolling(20).max())
         df['drawdown_20'] = (df['adj_close'] - df['max_20']) / df['max_20']
 
-        check_cols = ['disparity_20', 'alpha_20', 'drawdown_20', 'future_max_close_3d']
+        check_cols = ['disparity_20', 'alpha_20', 'drawdown_20','close_t1', 'close_t2', 'close_t3']
         df = df.dropna(subset=check_cols).reset_index(drop=True)
 
         meta_cols = ['ticker', 'date']

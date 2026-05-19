@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import tensorflow as tf
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -9,113 +10,65 @@ from sklearn.metrics import (
 )
 from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
+from tensorflow.keras.optimizers import Adam
 
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import (
     LSTM,
     Dense,
-    Dropout
+    Dropout,
+    BatchNormalization,
+    Activation
 )
-from tensorflow.keras.callbacks import EarlyStopping
+from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 
-# ---------------------------------------------------
-
+#----------------------------------------------------
 # 데이터 로드
-
 # ---------------------------------------------------
 
 # df = pd.read_csv("feature__indicator20260518.csv")
-df = pd.read_csv("feature__indicator_lstm20260518.csv")
+df = pd.read_csv("feature__indicator_lstm20260519.csv")
 
 df['date'] = pd.to_datetime(df['date'])
 
 # ---------------------------------------------------
-
 # Feature 선택
-
 # ---------------------------------------------------
 
-# feature_cols = [
-#     'alpha',
-#     'alpha_5',
-#     'alpha_20',
-#     'alpha_divergence',
-
-#     'ma_ratio',
-
-#     'rsi',
-
-#     'volatility_5',
-
-#     'volume_ratio',
-
-#     'nasdaq_change_rate',
-
-#     'macd_hist',
-
-#     'drawdown_20',
-
-#     'bb_percent',
-
-#     'tr_5'
-
-# ]
 feature_cols = [
-            # 1. returns (core)
-            'log_return',
-            'return_3',
-            'return_5',
-            'momentum_3',
-            'momentum_5',
-            'momentum_accel_3',
-            'momentum_accel_5',
+        # ===== 방향 흐름 =====
+        'log_return',
+        'return_1',
+        'return_3',
 
-            # 2. relative price
-            'close_ratio_10',
-            'close_ratio_20',
+        # ===== 추세 변화 =====
+        'momentum_3',
+        'momentum_accel_3',
+        # 'ma_slope_5',
+        # 'volatility_compression',
 
-            # 3. volatility dynamics
-            'atr_5',
-            'atr_change',
+        # ===== 변동성 흐름 =====
+        'atr_change',
+        'volatility_regime',
+        # ===== 거래량 흐름 =====
+        'volume_ratio',
+        'volume_change',
+        'volume_zscore',
+         # ===== 캔들 흐름 =====
+        'candle_body',
+        'high_low_spread',
 
-            # 4. volume shock
-            'volume_ratio',
-            'volume_change',
+        # ===== 시장 동조 =====
+        'relative_strength',
+]
 
-            # 5. candle structure
-            'candle_body',
-            'high_low_spread',
-             'volume_shock',
-             'volatility_regime',
-             'breakout_pressure'
-        ]
-# feature_cols = [
-#             # 1. 가격의 변화율 및 캔들 모양 (이미 0을 기준으로 정규화된 형태)
-#             'change_rate',
-#             'log_return',
-#             'candle_body',
-#             'high_low_spread',
-
-#             # 2. 거래량 지표 (Raw volume은 절대 금지, 비율로 치환된 것만 사용)
-#             'volume_ratio',
-#             'volume_change',
-
-#             # 3. 보조지표 (0~1 사이 혹은 스케일이 안정적인 녀석들)
-#             'bb_percent',     # 0~1 사이 값이라 LSTM이 환장하고 좋아함
-#             'volatility_5',   # 변동성 크기 표준편차
-#             'drawdown_20',     # 최고점 대비 낙폭 비율 (-0.1, -0.2 등)
-#             'macd_hist',      # 단기 에너지
-
-#             # 4. 시장 리스크 및 타겟
-#             'nasdaq_change_rate'
-#         ]
 
 target_col = 'label'
 
 # ---------------------------------------------------
 # 종목별 독립 스케일링
 # ---------------------------------------------------
-# 전체 통짜 정규화 대신, 종목 내부에서 각각 독립적으로 스케일링을 먹입니다.
+# 종목 내부에서 각각 독립적으로 스케일링
 def scale_by_ticker(dataframe, features):
     scaled_df = dataframe.sort_values(['ticker', 'date']).reset_index(drop=True)
 
@@ -199,45 +152,55 @@ print("X_val:", X_val.shape)
 print("X_test:", X_test.shape)
 
 # ---------------------------------------------------
-
 # LSTM 모델
-
 # ---------------------------------------------------
 
 model = Sequential([
     LSTM(
         64,
+        return_sequences=True,
         input_shape=(SEQ_LEN, len(feature_cols)),
-        return_sequences=False
     ),
+    BatchNormalization(),
     Dropout(0.3),
-    Dense(32, activation='relu'),
-    Dropout(0.2),
+
+    LSTM(
+        32,
+        return_sequences=False,
+    ),
+     BatchNormalization(),
+    Dropout(0.3),
+
+    # 완전 연결 레이어: he_normal 초기화 추가로 Relu 효율 극대화
+    Dense(16, kernel_initializer='he_normal'),
+    BatchNormalization(),
+    Activation('relu'),
+    
     Dense(1, activation='sigmoid')
 
 ])
 
 # ---------------------------------------------------
-
 # Compile
-
 # ---------------------------------------------------
-
+opt = Adam(learning_rate=0.0005)
 model.compile(
-    optimizer='adam',
+    optimizer=opt,
     loss='binary_crossentropy',
-    metrics=['accuracy']
+    metrics=[
+        'accuracy', 
+        tf.keras.metrics.AUC(name='auc') # 'auc'라는 이름으로 메트릭 추가
+    ]
 )
 
 # ---------------------------------------------------
-
 # Early Stopping
-
 # ---------------------------------------------------
 
 early_stop = EarlyStopping(
-    monitor='val_loss',
-    patience=5,
+    monitor='val_auc',
+    patience=10,
+    mode='max',
     restore_best_weights=True
 )
 
@@ -258,45 +221,33 @@ class_weights = dict(enumerate(class_weights))
 print(class_weights)
 
 # ---------------------------------------------------
-
 # 학습
-
 # ---------------------------------------------------
 
 history = model.fit(
     X_train_final,
     y_train_final,
-
     validation_data=(X_val, y_val),
-
-    epochs=30,
-
-    batch_size=64,
-
+    epochs=50,
+    batch_size=128,
     callbacks=[early_stop],
-
+    class_weight=class_weights,
     verbose=1,
-
-    class_weight=class_weights
-
 )
 
 # ---------------------------------------------------
-
 # 예측
-
 # ---------------------------------------------------
 
 pred_prob = model.predict(X_test).flatten()
 
-threshold = 0.8
+# 전체 체점용
+threshold = 0.53
 
 pred = (pred_prob >= threshold).astype(int)
 
 # ---------------------------------------------------
-
 # 평가
-
 # ---------------------------------------------------
 
 # 평가 리포트 출력
@@ -315,7 +266,13 @@ result_df = pd.DataFrame({
     'actual': y_test,
     'pred': pred,
     'pred_prob': pred_prob
-}).sort_values(by='pred_prob', ascending=False)
+})
+
+# 날짜별 정렬
+result_df = result_df.sort_values(
+    ['date', 'pred_prob'],
+    ascending=[True, False]
+)
 
 result_df.to_csv(
 "lstm_prediction_result.csv",
@@ -328,16 +285,42 @@ print(len(X_all), len(y_all), len(tickers_all), len(dates_all))
 # ---------------------------------------------------
 # Top-K 평가
 # ---------------------------------------------------
+print("\n===== Daily Top-K Performance =====")
 
-top_50 = result_df.drop_duplicates(subset=['ticker']).head(50)
-top_100 = result_df.head(100)
-top_200 = result_df.head(200)
+daily_top3_actuals = []
+daily_top5_actuals = []
+CONFIDENCE_THRESHOLD = 0.65
 
-print("\n===== Top-K Performance =====")
+print(f"테스트 데이터 시작 날짜: {result_df['date'].min()}")
+print(f"테스트 데이터 마지막 날짜: {result_df['date'].max()}")
+print(f"총 테스트 일수 (영업일 기준): {result_df['date'].nunique()}일")
 
-print(f"Top 50 상승 비율  : {top_50['actual'].mean():.4f}")
-print(top_50)
-print(f"Top 100 상승 비율 : {top_100['actual'].mean():.4f}")
-print(f"Top 200 상승 비율 : {top_200['actual'].mean():.4f}")
+for date, group in result_df.groupby('date'):
+    
+    # 그날 뱉은 확률 중 가장 높은 순으로 정렬
+    group_sorted = group.sort_values('pred_prob', ascending=False)
 
-print(f"\n전체 상승 비율 : {result_df['actual'].mean():.4f}")
+    top3 = group_sorted.head(3)
+    top5 = group_sorted.head(5)
+
+    valid_picks = top3[top3['pred_prob'] >= CONFIDENCE_THRESHOLD]
+    valid_picks = top5[top5['pred_prob'] >= CONFIDENCE_THRESHOLD]
+
+    if not valid_picks.empty:
+        daily_top3_actuals.extend(valid_picks['actual'].tolist())
+        daily_top5_actuals.extend(valid_picks['actual'].tolist())
+
+    real_top3_accuracy = np.mean(daily_top3_actuals) if daily_top3_actuals else 0
+    real_top5_accuracy = np.mean(daily_top5_actuals) if daily_top5_actuals else 0
+
+
+
+
+print(f"가드레일 기준: 예측 확률 {CONFIDENCE_THRESHOLD} 이상인 종목만 진입")
+print(f"매일 랭킹 Top 3 매수 시 진짜 타율 : {real_top3_accuracy:.4f}")
+print(f"총 매수 진입 횟수 (종목 수)       : {len(daily_top3_actuals)}개")
+
+print(f"매일 랭킹 Top 5 매수 시 진짜 타율 : {real_top5_accuracy:.4f}")
+print(f"총 매수 진입 횟수 (종목 수)       : {len(daily_top3_actuals)}개")
+
+print(f"시장 평균 상승 비율 (Baseline)     : {result_df['actual'].mean():.4f}")

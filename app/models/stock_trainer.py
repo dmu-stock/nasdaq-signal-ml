@@ -1,5 +1,6 @@
 import pandas as pd
 import os
+import numpy as np
 from lightgbm import LGBMClassifier
 from sklearn.metrics import (
     classification_report,
@@ -10,7 +11,7 @@ from sklearn.metrics import (
 # -----------------------------
 # 데이터 로드
 # -----------------------------
-df_tech = pd.read_csv("feature__indicator_20260518.csv")
+df_tech = pd.read_csv("feature__indicator_20260519.csv")
 # df_news = pd.read_csv("news_sentiment_20260513.csv")
 
 # final_df = pd.merge(df_tech,[['ticker', 'date', 'sentiment_score']],on=['ticker', 'date'], how='left')
@@ -25,16 +26,9 @@ df_tech['date'] = pd.to_datetime(df_tech['date'])
 # Feature 선택
 # -----------------------------
 feature_cols = [
-    # 'change_rate',
-    # 'return_5',
 
-    'alpha',
     'alpha_5',
     'alpha_20',
-    'alpha_divergence',
-
-    'ma_ratio',
-
     'rsi',
     'volatility_5',
 
@@ -42,20 +36,13 @@ feature_cols = [
 
     'nasdaq_change_rate',
 
-    #심리도
-    # 'psychological',
-
-            #macd
+     #macd
     'macd_hist',
 
     #최고가 대비 하락률
     'drawdown_20',
 
-    'bb_percent',
-
-    # 5일간의 고가 - 저가 평균 (종목의 활동성)
-    'tr_5'
-
+    'bb_percent'
 ]
 
 target_col = 'label'
@@ -142,6 +129,69 @@ result_df = test[['ticker', 'date']].copy()
 result_df['actual'] = y_test.values
 result_df['pred'] = pred
 result_df['pred_prob'] = pred_prob
+
+# -----------------------------
+# 날짜별 상대 점수(Z-score)
+# -----------------------------
+result_df['rank_score'] = (
+    result_df.groupby('date')['pred_prob']
+    .transform(
+        lambda x: (x - x.mean()) / (x.std() + 1e-9)
+    )
+)
+# -----------------------------
+# 날짜별 Top50 성능
+# -----------------------------
+daily_scores = []
+
+for date, group in result_df.groupby("date"):
+
+    top50 = group.sort_values(
+        "rank_score",
+        ascending=False
+    ).head(50)
+
+    hit_rate = top50["actual"].mean()
+
+    daily_scores.append(hit_rate)
+
+print("\n===== Daily Top50 Mean =====")
+print(np.mean(daily_scores))
+
+# -----------------------------
+# 전체 기준 Top-K
+# -----------------------------
+top_50 =(
+    result_df
+    .sort_values('rank_score',ascending=False)
+    .drop_duplicates(subset=["ticker"])
+    .head(50)
+) 
+    
+
+top_100 =(
+    result_df
+    .sort_values('rank_score',ascending=False)
+    .drop_duplicates(subset=["ticker"])
+    .head(100)
+) 
+
+top_200 =(
+    result_df
+    .sort_values('rank_score',ascending=False)
+    .drop_duplicates(subset=["ticker"])
+    .head(200)
+) 
+
+print("\n===== Top-K Performance =====")
+
+print(f"Top 50 상승 비율  : {top_50['actual'].mean():.4f}")
+print(top_50[['ticker', 'date', 'actual', 'pred_prob', 'rank_score']])
+
+print(f"Top 100 상승 비율 : {top_100['actual'].mean():.4f}")
+print(f"Top 200 상승 비율 : {top_200['actual'].mean():.4f}")
+
+print(f"\n전체 상승 비율 : {result_df['actual'].mean():.4f}")
 
 result_df.to_csv("prediction_result.csv", index=False)
 

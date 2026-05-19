@@ -80,8 +80,8 @@ BLUE_CHIP_STOCKS = [
     "DIS",     # Disney
 
     # ETFs
-    "SPY",     # S&P500 ETF
-    "QQQ",     # Nasdaq ETF
+    # "SPY",     # S&P500 ETF
+    # "QQQ",     # Nasdaq ETF
 ]
 
 def get_nasdaq_data(period: str = "4y") ->  Optional[pd.DataFrame]:
