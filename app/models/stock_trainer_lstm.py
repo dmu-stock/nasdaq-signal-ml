@@ -2,6 +2,11 @@ import pandas as pd
 import numpy as np
 import tensorflow as tf
 import joblib
+import random
+random.seed(42)
+np.random.seed(42)
+tf.random.set_seed(42)
+from app.config.config import LSTM_FEATURE_COLS
 
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -29,9 +34,13 @@ from tensorflow.keras.callbacks import EarlyStopping, ModelCheckpoint
 #----------------------------------------------------
 # 데이터 로드
 # ---------------------------------------------------
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+    for gpu in gpus:
+        tf.config.experimental.set_memory_growth(gpu, True)
 
 # df = pd.read_csv("feature__indicator20260518.csv")
-df = pd.read_csv("feature__indicator_lstm20260520.csv")
+df = pd.read_csv("feature__indicator_lstm20260521.csv")
 
 df['date'] = pd.to_datetime(df['date'])
 
@@ -39,40 +48,7 @@ df['date'] = pd.to_datetime(df['date'])
 # Feature 선택
 # ---------------------------------------------------
 
-feature_cols = [
-        # ===== 방향 흐름 =====
-            'return_3',
-            'return_20',
-
-            # ===== 추세 변화 =====
-            'momentum_3',
-            'momentum_20',          
-            'momentum_60',          
-            'momentum_accel_3',
-            'momentum_accel_20',
-
-            # ===== 변동성 흐름 =====
-            'atr_change',          
-            'volatility_regime_20', 
-            'volatility_regime_60', 
-
-            # ===== 거래량 흐름 =====
-            'volume_ratio',
-            'volume_change',
-            'volume_zscore_20',    
-            'volume_zscore_60',     
-
-            # ===== 캔들 흐름 =====
-            'candle_body',
-            'high_low_spread',
-
-            # ===== 시장 동조 =====
-            'relative_strength',
-            'high_breakout_20',
-            'high_breakout_60',
-]
-
-
+feature_cols = LSTM_FEATURE_COLS
 target_col = 'label'
 
 # ---------------------------------------------------
@@ -81,22 +57,34 @@ target_col = 'label'
 # 종목 내부에서 각각 독립적으로 스케일링
 def scale_by_ticker(dataframe, features):
     scalers = {}
-    scaled_df = dataframe.sort_values(['ticker', 'date']).reset_index(drop=True)
-
-    # 2025-07-01 기준으로 데이터 분할 기준점을 잡음 (Data Leakage 방지)
+    # 원본 데이터 보호를 위해 복사본 생성
+    scaled_df = dataframe.sort_values(['ticker', 'date']).reset_index(drop=True).copy()
+    
+    # 훈련/테스트 구분 마스크
     train_mask = scaled_df['date'] < '2025-07-01'
 
     for ticker, group in scaled_df.groupby('ticker'):
         ticker_mask = scaled_df['ticker'] == ticker
+        
+        # Train과 Test 기간 분리
         train_ticker_mask = ticker_mask & train_mask
+        test_ticker_mask = ticker_mask & (~train_mask)
 
         if train_ticker_mask.sum() > 0:
             scaler = StandardScaler()
-            # 훈련 데이터로만 fit
+            
+            # 훈련 데이터로만 fit (미래 정보 차단)
             scaler.fit(scaled_df.loc[train_ticker_mask, features])
-            # 해당 종목 전체(Train + Test)를 transform
-            scaled_df.loc[ticker_mask, features] = scaler.transform(scaled_df.loc[ticker_mask, features])
+            
+            # 훈련 데이터와 테스트 데이터를 각각 transform
+            scaled_df.loc[train_ticker_mask, features] = scaler.transform(scaled_df.loc[train_ticker_mask, features])
+            
+            # 테스트 데이터 변환 
+            if test_ticker_mask.sum() > 0:
+                scaled_df.loc[test_ticker_mask, features] = scaler.transform(scaled_df.loc[test_ticker_mask, features])
+            
             scalers[ticker] = scaler
+            
     joblib.dump(scalers, 'ticker_scalers.pkl')
     return scaled_df
 
@@ -190,31 +178,28 @@ num_features = len(feature_cols)
 input_20 = Input(shape=(SEQ_LEN_20, num_features), name='Input_20d')
 input_60 = Input(shape=(SEQ_LEN_60, num_features), name='Input_60d')
 
-# 채널 1: 20일선 추세 추출 레이어 (기존 지호님 아키텍처 반영)
-lstm_20_1 = LSTM(64, return_sequences=True)(input_20)
-lstm_20_1 = BatchNormalization()(lstm_20_1)
-lstm_20_1 = Dropout(0.3)(lstm_20_1)
+# 채널 1: 20일선 추세 추출 레이어
+lstm_20_1 = LSTM(32, return_sequences=True, dropout=0.3, recurrent_dropout=0.2)(input_20)
+lstm_20_2 = LSTM(32, return_sequences=False, dropout=0.3, recurrent_dropout=0.2)(lstm_20_1)
 
-lstm_20_2 = LSTM(32, return_sequences=False)(lstm_20_1)
-lstm_20_2 = BatchNormalization()(lstm_20_2)
-lstm_20_2 = Dropout(0.3)(lstm_20_2)
+# 채널 2: 60일선 중기 추세 추출 레이어
+lstm_60_1 = LSTM(64, return_sequences=True, dropout=0.3, recurrent_dropout=0.2)(input_60)
+lstm_60_2 = LSTM(64, return_sequences=True, dropout=0.3, recurrent_dropout=0.2)(lstm_60_1)
+lstm_60_3 = LSTM(32, return_sequences=False, dropout=0.3, recurrent_dropout=0.2)(lstm_60_2)
 
-# 채널 2: 60일선 중기 추세 추출 레이어 (타임스텝이 길어 LSTM 레이어 확장)
-lstm_60_1 = LSTM(128, return_sequences=True)(input_60)
-lstm_60_1 = BatchNormalization()(lstm_60_1)
-lstm_60_1 = Dropout(0.3)(lstm_60_1)
+merged = Concatenate()([lstm_20_2, lstm_60_3])
 
-lstm_60_2 = LSTM(64, return_sequences=False)(lstm_60_1)
-lstm_60_2 = BatchNormalization()(lstm_60_2)
-lstm_60_2 = Dropout(0.3)(lstm_60_2)
+#단계적 dense
+dense1 = Dense(48, kernel_initializer='he_normal')(merged)
+act1 = Activation('relu')(BatchNormalization()(dense1))
+drop1 = Dropout(0.3)(act1)
 
-merged = Concatenate()([lstm_20_2, lstm_60_2])
+dense2 = Dense(16, kernel_initializer='he_normal')(drop1)
+act2 = Activation('relu')(BatchNormalization()(dense2))
+drop2 = Dropout(0.2)(act2)
 
-dense = Dense(16, kernel_initializer='he_normal')(merged)
-dense = BatchNormalization()(dense)
-dense = Activation('relu')(dense)
-
-output = Dense(1, activation='sigmoid', name='Output_Probability')(dense)
+# 최종 출력
+output = Dense(1, activation='sigmoid', name='Output_Probability')(drop2)
 
 model = Model(inputs=[input_20, input_60], outputs=output)
 # ---------------------------------------------------
@@ -340,12 +325,13 @@ for date, group in result_df.groupby('date'):
     top3 = group_sorted.head(3)
     top5 = group_sorted.head(5)
 
-    valid_picks = top3[top3['pred_prob'] >= CONFIDENCE_THRESHOLD]
-    valid_picks = top5[top5['pred_prob'] >= CONFIDENCE_THRESHOLD]
+    valid_top3 = top3[top3['pred_prob'] >= CONFIDENCE_THRESHOLD]
+    valid_top5 = top5[top5['pred_prob'] >= CONFIDENCE_THRESHOLD]
 
-    if not valid_picks.empty:
-        daily_top3_actuals.extend(valid_picks['actual'].tolist())
-        daily_top5_actuals.extend(valid_picks['actual'].tolist())
+    if not valid_top3.empty:
+        daily_top3_actuals.extend(valid_top3['actual'].tolist())
+    if not valid_top5.empty:
+        daily_top5_actuals.extend(valid_top5['actual'].tolist())
 
     real_top3_accuracy = np.mean(daily_top3_actuals) if daily_top3_actuals else 0
     real_top5_accuracy = np.mean(daily_top5_actuals) if daily_top5_actuals else 0

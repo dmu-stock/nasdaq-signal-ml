@@ -4,6 +4,7 @@ import numpy as np
 import joblib
 import tensorflow as tf
 from datetime import datetime
+from app.config.config import GBM_FEATURE_COLS,LSTM_FEATURE_COLS
 from tensorflow.keras.models import load_model
 
 # ===================================================
@@ -42,7 +43,8 @@ TICKERS = [
     "PLTR",
     "SNOW",
     "CRWD",
-    "PANW"
+    "PANW",
+    "^SOX"
 ]
 
 print("독립 듀얼 파이프라인 실전 추론 테스트")
@@ -76,7 +78,7 @@ lstm_proc = FeatureProcessorLSTM()
 
 # 원본 데이터 오염 방지를 위해 .copy() 전달 및 실전 추론 플래그 True 작동
 df_features_gbm = gbm_proc.calc_technical_indicators(df_raw.copy(), is_inference=True)
-df_features_lstm = lstm_proc.calc_technical_indicators(df_raw.copy(), is_inference=False)
+df_features_lstm = lstm_proc.calc_technical_indicators(df_raw.copy(), is_inference=True)
 
 # 무한대값 정리
 df_features_gbm = df_features_gbm.replace([np.inf, -np.inf], np.nan)
@@ -95,48 +97,7 @@ for ticker in TICKERS:
     if ticker_gbm.empty:
         continue    
     
-    gbm_cols = [
-    'change_rate',
-    'return_1',
-    'return_5',
-    #이격도
-    'disparity_20',
-
-    # 시장 상대 강도
-    'alpha',
-    'alpha_5',
-    'alpha_20',
-    'alpha_divergence',
-
-    # 이동평균
-    'ma_ratio',
-    'price_ma20',
-
-     # RSI / 변동성
-    'rsi',
-    'volatility_5',
-
-    #볼린저
-    'bb_percent',
-
-    #심리도
-    'psychological',
-
-    #macd
-    'macd_hist',
-
-    # 거래량
-    'volume_ratio',
-
-    #최고가 대비 하락률
-    'drawdown_20',
-
-    # 시장
-    'nasdaq_change_rate',
-            
-    # 5일간의 고가 - 저가 평균 (종목의 활동성)
-    'tr_5'
-    ]
+    gbm_cols = GBM_FEATURE_COLS
     
     # 오늘 밤 마감된 가장 마지막 행 추출 (데이터프레임 형태 유지를 위해 .iloc[[-1]])
     lgb_input = ticker_gbm[gbm_cols].iloc[[-1]]
@@ -152,38 +113,7 @@ for ticker in TICKERS:
     if len(ticker_lstm) < SEQ_LEN_60:
         continue
         
-    lstm_cols = [
-        # ===== 방향 흐름 =====
-            'return_3',
-            'return_20',
-
-            # ===== 추세 변화 =====
-            'momentum_3',
-            'momentum_20',          
-            'momentum_60',          
-            'momentum_accel_3',
-            'momentum_accel_20',
-
-            # ===== 변동성 흐름 =====
-            'atr_change',          
-            'volatility_regime_20', 
-            'volatility_regime_60', 
-
-            # ===== 거래량 흐름 =====
-            'volume_ratio',
-            'volume_change',
-            'volume_zscore_20',    
-            'volume_zscore_60',     
-
-            # ===== 캔들 흐름 =====
-            'candle_body',
-            'high_low_spread',
-
-            # ===== 시장 동조 =====
-            'relative_strength',
-            'high_breakout_20',
-            'high_breakout_60',
-    ]
+    lstm_cols = LSTM_FEATURE_COLS
     ticker_lstm_ordered = ticker_lstm[lstm_cols]
     # 최신 20영업일, 60영업일 피처 배열 분리 (.values)
     seq_20 = ticker_lstm_ordered.iloc[-SEQ_LEN_20:].values

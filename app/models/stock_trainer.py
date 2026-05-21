@@ -2,6 +2,7 @@ import pandas as pd
 import os
 import numpy as np
 import joblib
+from app.config.config import GBM_FEATURE_COLS
 from lightgbm import LGBMClassifier
 from sklearn.metrics import (
     classification_report,
@@ -12,7 +13,7 @@ from sklearn.metrics import (
 # -----------------------------
 # 데이터 로드
 # -----------------------------
-df_tech = pd.read_csv("feature__indicator_20260520.csv")
+df_tech = pd.read_csv("feature__indicator_20260521.csv")
 # df_news = pd.read_csv("news_sentiment_20260513.csv")
 
 # final_df = pd.merge(df_tech,[['ticker', 'date', 'sentiment_score']],on=['ticker', 'date'], how='left')
@@ -26,50 +27,7 @@ df_tech['date'] = pd.to_datetime(df_tech['date'])
 # -----------------------------
 # Feature 선택
 # -----------------------------
-feature_cols = [
-    # 모멘텀
-    'change_rate',
-    'return_1',
-    'return_5',
-            #이격도
-    'disparity_20',
-
-    # 시장 상대 강도
-    'alpha',
-    'alpha_5',
-    'alpha_20',
-    'alpha_divergence',
-
-    # 이동평균
-    'ma_ratio',
-    'price_ma20',
-
-     # RSI / 변동성
-    'rsi',
-    'volatility_5',
-
-    #볼린저
-    'bb_percent',
-
-    #심리도
-    'psychological',
-
-    #macd
-    'macd_hist',
-
-    # 거래량
-    'volume_ratio',
-
-    #최고가 대비 하락률
-    'drawdown_20',
-
-    # 시장
-    'nasdaq_change_rate',
-            
-    # 5일간의 고가 - 저가 평균 (종목의 활동성)
-    'tr_5'
-    
-]
+feature_cols = GBM_FEATURE_COLS
 
 target_col = 'label'
 
@@ -93,10 +51,10 @@ print(f"Test Size: {len(test)}")
 # LightGBM 모델 생성
 # -----------------------------
 model = LGBMClassifier(
+    n_estimators=1000,
     objective='binary',
     boosting_type='gbdt',
 
-    n_estimators=300,
     learning_rate=0.01,
 
     max_depth=5,

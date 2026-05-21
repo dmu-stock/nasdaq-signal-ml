@@ -22,6 +22,7 @@ import pandas as pd
 import numpy as np
 from app.database.sqlite_db import get_connection
 from datetime import datetime
+from app.config.config import LSTM_FEATURE_COLS
 
 class FeatureProcessorLSTM:
     def __init__(self, db_path: str = "stock_data.db"):
@@ -59,6 +60,7 @@ class FeatureProcessorLSTM:
 
         df['atr_5'] = df.groupby('ticker')['tr'].transform(lambda x: x.rolling(5).mean())
         df['atr_change'] = df.groupby('ticker')['atr_5'].pct_change(fill_method=None)
+        df['atr_change'] = df['atr_change'].replace([np.inf, -np.inf], np.nan)
 
         # ---------------------------
         # 2. 수익률 및 변동성 (Return & Vol)
@@ -107,7 +109,7 @@ class FeatureProcessorLSTM:
                 df['volume'] - df.groupby('ticker')['volume'].transform(lambda x: x.rolling(10).mean())
             ) / (df.groupby('ticker')['volume'].transform(lambda x: x.rolling(10).std()) + 1e-9)
 
-            df['volume_shock'] = df['volume_z'].rolling(3).max()
+            df['volume_shock'] = df.groupby('ticker')['volume_z'].transform(lambda x: x.rolling(3).max())
             
             # 20일선 수급 지표
             df['volume_zscore_20'] = (df['volume'] - df.groupby('ticker')['volume'].transform(lambda x: x.rolling(20).mean())) / (df.groupby('ticker')['volume'].transform(lambda x: x.rolling(20).std()) + 1e-9)
@@ -152,8 +154,11 @@ class FeatureProcessorLSTM:
         df['relative_strength'] = df['change_rate'] - df['nasdaq_change_rate']
 
         # 고점 돌파 거리(돌파 직전 패턴 잡기)
-        df['high_breakout_20'] =df['adj_close'] /df['high'].rolling(20).max()
-        df['high_breakout_60'] =df['adj_close'] /df['high'].rolling(60).max()
+        df['high_breakout_20'] =df.groupby('ticker')['high'].transform(lambda x: x.rolling(20).max())
+        df['high_breakout_20'] = df['adj_close'] / (df['high_breakout_20'] + 1e-9)
+
+        df['high_breakout_60'] = df.groupby('ticker')['high'].transform(lambda x: x.rolling(60).max())
+        df['high_breakout_60'] = df['adj_close'] / (df['high_breakout_60'] + 1e-9)
 
         # ---------------------------------------------------
         # 미래 3영업일 종가 기준 라벨링
@@ -180,39 +185,9 @@ class FeatureProcessorLSTM:
         # 6. 컬럼 필터링 및 데이터 동적 정리
         # ---------------------------------------------------
         meta_cols = ['ticker', 'date']
-        feature_cols = [
-            'return_3',
-            'return_20',
+        feature_cols = LSTM_FEATURE_COLS
 
-            # ===== 추세 변화 =====
-            'momentum_3',
-            'momentum_20',          
-            'momentum_60',          
-            'momentum_accel_3',
-            'momentum_accel_20',
-
-            # ===== 변동성 흐름 =====
-            'atr_change',          
-            'volatility_regime_20', 
-            'volatility_regime_60', 
-
-            # ===== 거래량 흐름 =====
-            'volume_ratio',
-            'volume_change',
-            'volume_zscore_20',    
-            'volume_zscore_60',     
-
-            # ===== 캔들 흐름 =====
-            'candle_body',
-            'high_low_spread',
-
-            # ===== 시장 동조 =====
-            'relative_strength',
-            'high_breakout_20',
-            'high_breakout_60',
-        ]
-
-        # 💡 학습 모드일 때만 'label'을 피처 명단에 동적으로 결합
+        # 학습 모드일 때만 'label'을 피처 명단에 결합
         if not is_inference:
             feature_cols.append('label')
 

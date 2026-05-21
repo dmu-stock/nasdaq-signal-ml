@@ -22,6 +22,7 @@ import pandas as pd
 import numpy as np
 from app.database.sqlite_db import get_connection
 from datetime import datetime
+from app.config.config import GBM_FEATURE_COLS
 
 class FeatureProcessorGBM:
     def __init__(self, db_path: str = "stock_data.db"):
@@ -153,94 +154,102 @@ class FeatureProcessorGBM:
         df['max_20'] = df.groupby('ticker')['high'].transform(lambda x: x.rolling(20).max())
         df['drawdown_20'] = (df['adj_close'] - df['max_20']) / df['max_20']
 
+        # 52주 고가 대비 현재가 위치 (0=52주 저점, 1=52주 고점)
+        df['price_position_52w'] = (
+            (df['adj_close'] - df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(252).min())) /
+            (df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(252).max()) - 
+            df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(252).min()) + 1e-9)
+        )
+
+        # 현재가가 20일 밴드 어디쯤인지 (이미 bb_percent 있으므로 60일 버전 추가)
+        std_60 = df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(60).std())
+        ma_60  = df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(60).mean())
+        df['bb_percent_60'] = (df['adj_close'] - (ma_60 - 2*std_60)) / (4*std_60 + 1e-9)
+
+        # 나스닥 5일 누적 수익률
+        df['nasdaq_5d'] = (
+            df.groupby('date')['nasdaq_change_rate']
+            .transform(lambda x: (1 + x).rolling(5).apply(np.prod, raw=True) - 1)
+        )
+
 
         if not is_inference:
             # 미래 수익률
-            df['target_1'] = (
-                df.groupby('ticker')['adj_close']
-                .shift(-1) / df['adj_close'] - 1
+            # df['target_1'] = (
+            #     df.groupby('ticker')['adj_close']
+            #     .shift(-1) / df['adj_close'] - 1
+            # )
+
+            # df['target_5'] = (
+            #     df.groupby('ticker')['adj_close']
+            #     .shift(-5) / df['adj_close'] - 1
+            # )
+
+            # # 1. 내일 종가(t1), 모레 종가(t2), 글피 종가(t3)를 미래에서 정확히 당겨오기
+            # df['close_t1'] = df.groupby('ticker')['adj_close'].shift(-1)
+            # df['close_t2'] = df.groupby('ticker')['adj_close'].shift(-2)
+            # df['close_t3'] = df.groupby('ticker')['adj_close'].shift(-3)
+
+            # # 2. 오늘 종가(adj_close) 대비 미래 각 영업일 종가의 수익률 계산
+            # df['return_t1'] = (df['close_t1'] - df['adj_close']) / df['adj_close']
+            # df['return_t2'] = (df['close_t2'] - df['adj_close']) / df['adj_close']
+            # df['return_t3'] = (df['close_t3'] - df['adj_close']) / df['adj_close']
+
+            # # 3. 미래 3일의 '종가 기준 최고 수익률'만 쏙 뽑아내기
+            # df['max_return_3d'] = df[['return_t1', 'return_t2', 'return_t3']].max(axis=1)
+
+            # # 4. 라벨링: 3일 중 한 번이라도 종가 기준으로 +2.5% 이상 올랐으면 1, 아니면 0
+            # df['label'] = np.where(df['max_return_3d'] >= 0.025, 1, 0)
+
+            df['high_20'] = df.groupby('ticker')['high'].transform(lambda x: x.rolling(20).max())
+
+            # 5일 후 수익률
+            df['forward_5d'] = (
+                df.groupby('ticker')['adj_close'].shift(-5) / df['adj_close'] - 1
             )
-
-            df['target_5'] = (
-                df.groupby('ticker')['adj_close']
-                .shift(-5) / df['adj_close'] - 1
+            
+            # 나스닥 5일 누적 수익률 (시장 베타 제거)
+            df['nasdaq_forward_5d'] = df.groupby('ticker')['nasdaq_change_rate'].transform(
+                lambda x: (1 + x).rolling(5).apply(np.prod, raw=True) - 1
+            ).shift(-5)  # 미래 5일
+            
+            # 초과수익 = 종목 수익률 - 나스닥 수익률
+            df['excess_5d'] = df['forward_5d'] - df['nasdaq_forward_5d']
+            
+            # 눌림목 z-score (종목 자체 기준)
+            df['pullback'] = (df['adj_close'] / df['high_20']) - 1
+            df['pullback_zscore'] = (
+                df['pullback'] - df.groupby('ticker')['pullback']
+                .transform(lambda x: x.rolling(60).mean())
+            ) / (df.groupby('ticker')['pullback']
+                .transform(lambda x: x.rolling(60).std()) + 1e-9)
+            
+            # 라벨: 평소보다 더 눌렸고 + 나스닥보다 더 올랐으면 1
+            df['label'] = np.where(
+                (df['pullback_zscore'] <= -0.5) &   # 평소 대비 더 눌린 상태
+                (df['excess_5d'] >= 0.01),           # 나스닥 대비 +2% 초과수익
+                1, 0
             )
-
-            # 1. 내일 종가(t1), 모레 종가(t2), 글피 종가(t3)를 미래에서 정확히 당겨오기
-            df['close_t1'] = df.groupby('ticker')['adj_close'].shift(-1)
-            df['close_t2'] = df.groupby('ticker')['adj_close'].shift(-2)
-            df['close_t3'] = df.groupby('ticker')['adj_close'].shift(-3)
-
-            # 2. 오늘 종가(adj_close) 대비 미래 각 영업일 종가의 수익률 계산
-            df['return_t1'] = (df['close_t1'] - df['adj_close']) / df['adj_close']
-            df['return_t2'] = (df['close_t2'] - df['adj_close']) / df['adj_close']
-            df['return_t3'] = (df['close_t3'] - df['adj_close']) / df['adj_close']
-
-            # 3. 미래 3일의 '종가 기준 최고 수익률'만 쏙 뽑아내기
-            df['max_return_3d'] = df[['return_t1', 'return_t2', 'return_t3']].max(axis=1)
-
-            # 4. 라벨링: 3일 중 한 번이라도 종가 기준으로 +2.5% 이상 올랐으면 1, 아니면 0
-            df['label'] = np.where(df['max_return_3d'] >= 0.025, 1, 0)
-
-            check_cols = ['disparity_20', 'alpha_20', 'drawdown_20','close_t1', 'close_t2', 'close_t3']
-            df = df.dropna(subset=check_cols).reset_index(drop=True)
+            
+            print("양성 비율:", df['label'].mean())
         else:
-            check_cols_inf = ['disparity_20', 'alpha_20', 'drawdown_20', 'rsi', 'macd_hist']
-            df = df.dropna(subset=check_cols_inf).reset_index(drop=True)
+            # 라벨이 없으므로 -1로 초기화
             df['label'] = -1
+            
+            # 필요한 컬럼만 체크
+            check_cols_inf = ['disparity_20', 'alpha_20', 'drawdown_20', 'rsi', 'macd_hist']
+            # 결측치 제거
+            df = df.dropna(subset=check_cols_inf).reset_index(drop=True)
 
         
         
 
         meta_cols = ['ticker', 'date']
-        feature_cols = [
-            # 모멘텀
-            'change_rate',
-            'return_1',
-            'return_5',
-            #이격도
-            'disparity_20',
-
-            # 시장 상대 강도
-            'alpha',
-            'alpha_5',
-            'alpha_20',
-            'alpha_divergence',
-
-            # 이동평균
-            'ma_ratio',
-            'price_ma20',
-
-            # RSI / 변동성
-            'rsi',
-            'volatility_5',
-
-            #볼린저
-            'bb_percent',
-
-            #심리도
-            'psychological',
-
-            #macd
-            'macd_hist',
-
-            # 거래량
-            'volume_ratio',
-
-            #최고가 대비 하락률
-            'drawdown_20',
-
-            # 시장
-            'nasdaq_change_rate',
-
-            # 타겟
-            'label',
-            # 5일간의 고가 - 저가 평균 (종목의 활동성)
-            'tr_5'
-        ]
-        df = df[meta_cols + feature_cols]
+        feature_cols = GBM_FEATURE_COLS
         if not is_inference:
-            feature_cols.append('label')
+            df = df[meta_cols + feature_cols + ['label']]
+        else:
+            df = df[meta_cols + feature_cols]
 
         print(df.columns)
 
