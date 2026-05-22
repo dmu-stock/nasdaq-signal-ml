@@ -13,7 +13,7 @@ from sklearn.metrics import (
 # -----------------------------
 # 데이터 로드
 # -----------------------------
-df_tech = pd.read_csv("feature__indicator_20260521.csv")
+df_tech = pd.read_csv("feature__indicator_20260522.csv")
 # df_news = pd.read_csv("news_sentiment_20260513.csv")
 
 # final_df = pd.merge(df_tech,[['ticker', 'date', 'sentiment_score']],on=['ticker', 'date'], how='left')
@@ -63,7 +63,7 @@ model = LGBMClassifier(
     feature_fraction= 0.8,
     force_col_wise= True,
     subsample=0.8,
-    colsample_bytree=0.8,
+    colsample_bytree=0.7,
 
     random_state=42,
     class_weight='balanced',

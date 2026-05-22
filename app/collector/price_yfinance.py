@@ -18,44 +18,13 @@ import yfinance as yf
 import pandas as pd
 from typing import List, Optional
 from app.database.sqlite_db import save_price_to_db
+from app.config.config import TICKERS
 
 
 # -------------------------------------------------
-# 수집 대상: 미국 우량주 10종목
-# (Yahoo Finance 티커 기준)
+# 수집 대상: nasdaq 지수
 # -------------------------------------------------
-BLUE_CHIP_STOCKS = [
-    "NVDA", "AMD", "AVGO", "MU", "QCOM", "INTC", "TXN", "AMAT", "LRCX", "KLAC",
-    
-    # 빅테크
-    "MSFT", "AMZN", "META", "GOOGL", "AAPL", "TSLA", "NFLX", "CRM", "ADBE", "NOW",
-    
-    # 클라우드/사이버
-    "PLTR", "SNOW", "CRWD", "PANW", "ZS", "OKTA", "NET", "DDOG", "MDB", "GTLB",
-    
-    # 핀테크/기타 성장
-    "COIN", "SQ", "SHOP", "MELI", "SPOT", "UBER", "ABNB", "DASH", "TTD", "RBLX"
-]
-CORE_STOCKS = [
-
-    "NVDA",
-    "AMD",
-    "AVGO",
-    "MU",
-    "QCOM",
-
-    "MSFT",
-    "AMZN",
-    "META",
-    "GOOGL",
-    "TSLA",
-
-    "NFLX",
-    "PLTR",
-    "SNOW",
-    "CRWD",
-    "PANW"
-]
+tickers = TICKERS
 
 def get_nasdaq_data(period: str = "4y") ->  Optional[pd.DataFrame]:
     nasdaq = yf.download(
@@ -94,7 +63,72 @@ def get_nasdaq_data(period: str = "4y") ->  Optional[pd.DataFrame]:
 
     return nasdaq[['date', 'nasdaq_close', 'nasdaq_change_rate']]
 
+# -------------------------------------------------
+# 수집 대상: vix 지수, 10년물 미국 국채금리 수집
+# -------------------------------------------------
+def get_market_regime_data(period: str = "4y") ->  Optional[pd.DataFrame]:
+    vix_raw = yf.download(
+        "^VIX",
+        period=period,
+        interval="1d",
+        auto_adjust=True,
+        progress=False
+    )
 
+    tnx_raw = yf.download(
+        "^TNX",
+        period=period,
+        interval="1d",
+        auto_adjust=True,
+        progress=False
+    )
+
+    if vix_raw.empty or tnx_raw.empty:
+        print("[경고] VIX 또는 TNX 데이터 없음")
+        return None
+
+    if isinstance(vix_raw.columns, pd.MultiIndex):
+        vix_raw.columns = vix_raw.columns.get_level_values(0)
+    if isinstance(tnx_raw.columns, pd.MultiIndex):
+        tnx_raw.columns = tnx_raw.columns.get_level_values(0)
+
+    # Close 컬럼만 추출
+    vix = vix_raw[['Close']].copy()
+    tnx = tnx_raw[['Close']].copy()
+
+    vix.index = pd.to_datetime(vix.index).tz_localize(None)
+    tnx.index = pd.to_datetime(tnx.index).tz_localize(None)
+
+    vix.columns = ['vix']
+    tnx.columns = ['tnx']
+
+    # 날짜 기준으로 합치기
+    regime_df = pd.merge(
+        vix.reset_index(),
+        tnx.reset_index(),
+        on='Date',
+        how='outer'
+    )
+
+    regime_df = regime_df.rename(columns={'Date': 'date'})
+    regime_df['date'] = pd.to_datetime(regime_df['date'])
+    regime_df = regime_df.sort_values('date').reset_index(drop=True)
+
+    # 빈 날짜 채우기
+    regime_df['vix'] = regime_df['vix'].ffill()
+    regime_df['tnx'] = regime_df['tnx'].ffill()
+
+    print(f"[완료] VIX/TNX 수집: {len(regime_df)}행 "
+          f"| {regime_df['date'].min()} ~ {regime_df['date'].max()}")
+
+    return regime_df    
+
+
+
+# -------------------------------------------------
+# 수집 대상: 대상 tickers 4y stock row data
+# 동작 방식: 주가 데이터 수집 후 나스닥 데이터와 결합, alpha 계산 후 추가
+# -------------------------------------------------
 def fetch_price_data(
     ticker: str,
     nasdaq_df,
@@ -120,7 +154,6 @@ def fetch_price_data(
         # -----------------------------
         # 데이터 전처리
         # -----------------------------
-
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
 
@@ -183,28 +216,13 @@ def fetch_price_data(
 
 
 def fetch_all_stocks_price_data(
-    tickers: List[str] = BLUE_CHIP_STOCKS,
-    period: str = "3y"
+    tickers: List[str] = tickers,
+    period: str = "4y"
 ) -> pd.DataFrame:
-    """
-    여러 종목의 주가 데이터를 일괄 수집하여 하나의 DataFrame으로 결합한다.
-
-    Parameters
-    ----------
-    tickers : List[str]
-        수집할 종목 티커 리스트
-    period : str
-        조회 기간 (기본값: "2y")
-
-    Returns
-    -------
-    pd.DataFrame
-        모든 종목 데이터를 수직 결합한 DataFrame.
-        수집 실패한 종목은 자동으로 제외된다.
-    """
 
     data_frames = []
     nasdaq_df=get_nasdaq_data()
+    regime_df = get_market_regime_data()
 
     for ticker in tickers:
         print(f"[수집 중] {ticker} ...")
@@ -222,22 +240,27 @@ def fetch_all_stocks_price_data(
     # 모든 종목 데이터를 하나로 결합
     combined_df = pd.concat(data_frames, ignore_index=True)
 
+    # 날짜형식 통일
+    combined_df['date'] = pd.to_datetime(combined_df['date'])
+    regime_df['date']   = pd.to_datetime(regime_df['date'])
+
+    # regime 1번만 병합
+    if regime_df is not None:
+        combined_df = pd.merge(combined_df, regime_df, on='date', how='left')
+        combined_df['vix'] = combined_df['vix'].ffill()
+        combined_df['tnx'] = combined_df['tnx'].ffill()
+    else:
+        combined_df['vix'] = 0.0
+        combined_df['tnx'] = 0.0
+
     print(f"\n[완료] 총 {len(data_frames)}개 종목, {len(combined_df)}개 행 수집")
     return combined_df
 
 
+# -----------------------------
+# 수집된 데이터 csv 저장
+# -----------------------------
 def save_to_csv(df: pd.DataFrame, filename: str) -> None:
-    """
-    수집된 가격 데이터를 CSV 파일로 저장한다.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        저장할 데이터
-    filename : str
-        저장할 파일 경로
-    """
-
     if df.empty:
         print("[경고] 저장할 데이터가 없습니다.")
         return

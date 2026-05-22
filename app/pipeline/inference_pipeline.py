@@ -4,7 +4,7 @@ import numpy as np
 import joblib
 import tensorflow as tf
 from datetime import datetime
-from app.config.config import GBM_FEATURE_COLS,LSTM_FEATURE_COLS
+from app.config.config import GBM_FEATURE_COLS,LSTM_FEATURE_COLS,TICKERS
 from tensorflow.keras.models import load_model
 
 # ===================================================
@@ -21,23 +21,12 @@ from app.features.processor_lstm import FeatureProcessorLSTM
 # 가드레일 & 타임프레임 스펙 고정
 # ---------------------------------------------------
 LGBM_THRESHOLD = 0.55
-LSTM_THRESHOLD = 0.50
+LSTM_THRESHOLD = 0.58
 SEQ_LEN_20 = 20
 SEQ_LEN_60 = 60
 
 # 주먹 봇 핵심 관리 대장주 리스트
-TICKERS = [
-    "NVDA", "AMD", "AVGO", "MU", "QCOM", "INTC", "TXN", "AMAT", "LRCX", "KLAC",
-    
-    # 빅테크
-    "MSFT", "AMZN", "META", "GOOGL", "AAPL", "TSLA", "NFLX", "CRM", "ADBE", "NOW",
-    
-    # 클라우드/사이버
-    "PLTR", "SNOW", "CRWD", "PANW", "ZS", "OKTA", "NET", "DDOG", "MDB", "GTLB",
-    
-    # 핀테크/기타 성장
-    "COIN", "SQ", "SHOP", "MELI", "SPOT", "UBER", "ABNB", "DASH", "TTD", "RBLX"
-]
+tickers = TICKERS
 
 print("독립 듀얼 파이프라인 실전 추론 테스트")
 
@@ -54,7 +43,7 @@ print("✅ LightGBM & Multi-Input LSTM 가중치 로드 완료.")
 # ===================================================
 print("야후 파이낸스 최신 마켓 데이터 및 나스닥 등락율 결합")
 
-df_raw = fetch_all_stocks_price_data(tickers=TICKERS, period="1y")
+df_raw = fetch_all_stocks_price_data(tickers=tickers, period="1y")
 
 if df_raw.empty:
     print("[에러] 최신 마켓 데이터 수집에 실패")

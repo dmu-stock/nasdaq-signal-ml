@@ -160,6 +160,14 @@ class FeatureProcessorLSTM:
         df['high_breakout_60'] = df.groupby('ticker')['high'].transform(lambda x: x.rolling(60).max())
         df['high_breakout_60'] = df['adj_close'] / (df['high_breakout_60'] + 1e-9)
 
+        # ---------------------------
+        # vix/tnx 파생 피처
+        # ---------------------------
+        # VIX가 개별 종목의 변동성에 비해 얼마나 과도한지 적은지
+        df['vix_vs_stock_vol'] = df['vix'] / (df['volatility_5'] * 100 + 1e-9)
+
+        
+
         # ---------------------------------------------------
         # 미래 3영업일 종가 기준 라벨링
         # ---------------------------------------------------

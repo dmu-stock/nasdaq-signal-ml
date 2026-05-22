@@ -40,7 +40,7 @@ if gpus:
         tf.config.experimental.set_memory_growth(gpu, True)
 
 # df = pd.read_csv("feature__indicator20260518.csv")
-df = pd.read_csv("feature__indicator_lstm20260521.csv")
+df = pd.read_csv("feature__indicator_lstm20260522.csv")
 
 df['date'] = pd.to_datetime(df['date'])
 
@@ -59,6 +59,9 @@ def scale_by_ticker(dataframe, features):
     scalers = {}
     # 원본 데이터 보호를 위해 복사본 생성
     scaled_df = dataframe.sort_values(['ticker', 'date']).reset_index(drop=True).copy()
+
+    scaled_df[features] = scaled_df[features].replace([np.inf, -np.inf], np.nan)
+    scaled_df = scaled_df.dropna(subset=features).reset_index(drop=True)
     
     # 훈련/테스트 구분 마스크
     train_mask = scaled_df['date'] < '2025-07-01'

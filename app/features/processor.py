@@ -55,8 +55,8 @@ class FeatureProcessorGBM:
         df['ma_ratio'] = df['ma5'] / df['ma20']
         df['price_ma20'] = df['adj_close'] / df['ma20']
 
-        df['disparity_20'] = (df['adj_close'] / df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(20).mean())) * 100
-        df['disparity_20'] = df['disparity_20'].fillna(100)
+        # df['disparity_20'] = (df['adj_close'] / df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(20).mean())) * 100
+        # df['disparity_20'] = df['disparity_20'].fillna(100)
 
         # MACD (이동평균 수렴 확산 지수) : 단기 이평선과 장기 이평선이 얼마나 빨리 멀어지는지(에너지)를 측정
         short_ema = df.groupby('ticker')['adj_close'].transform(lambda x: x.ewm(span=12, adjust=False).mean())
@@ -93,7 +93,7 @@ class FeatureProcessorGBM:
         df['rsi'] = 100 - (100 / (1 + rs))
 
         #이격도
-        # df['disparity_20'] = (df['adj_close'] - df['ma20']) / df['ma20']
+        df['disparity_20'] = (df['adj_close'] - df['ma20']) / df['ma20']
 
         # 볼린저 밴드 %B
         std = df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(20).std())
@@ -102,6 +102,8 @@ class FeatureProcessorGBM:
         df['lower_band'] = ma20 - (std * 2)
         # 현재가가 밴드 내 어디 위치하는지 (0~1 사이 값)
         df['bb_percent'] = (df['adj_close'] - df['lower_band']) / (df['upper_band'] - df['lower_band'])
+
+        df['disparity_zscore'] = (df['adj_close'] - ma20) / (std + 1e-9)
 
         # ---------------------------
         # 3. 수익률 (Return)
@@ -128,6 +130,7 @@ class FeatureProcessorGBM:
                 .transform(lambda x: x.rolling(5).mean())
             )
             df['volume_ratio'] = df['volume'] / (df['volume_ma5'] + 1e-9)
+            
 
         # ---------------------------
         # 시장 대비 (Alpha)
@@ -166,6 +169,8 @@ class FeatureProcessorGBM:
         ma_60  = df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(60).mean())
         df['bb_percent_60'] = (df['adj_close'] - (ma_60 - 2*std_60)) / (4*std_60 + 1e-9)
 
+        
+
         # 나스닥 5일 누적 수익률
         df['nasdaq_5d'] = (
             df.groupby('date')['nasdaq_change_rate']
@@ -199,7 +204,16 @@ class FeatureProcessorGBM:
             lambda x: x.rolling(252).min())) /
         (df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(252).max()) -
         df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(252).min()) + 1e-9)
-    )
+        )
+        # vix/tnx 파생 피처
+        df['vix_regime'] = pd.cut(
+            df['vix'],
+            bins=[0, 15, 20, 25, 30, 999],
+            labels=[0, 1, 2, 3, 4]
+        ).astype(float)
+
+        df['tnx_change_5']  = df['tnx'].pct_change(5)   # 5일 변화율
+        df['tnx_change_20'] = df['tnx'].pct_change(20)
 
         if not is_inference:
         
@@ -230,16 +244,12 @@ class FeatureProcessorGBM:
             # 4. 라벨링: 3일 중 한 번이라도 종가 기준으로 +2.5% 이상 올랐으면 1, 아니면 0
             df['label'] = np.where(df['max_return_3d'] >= 0.025, 1, 0)
 
-        
-            
-        
         #     # 라벨: 평소보다 더 눌렸고 + 나스닥보다 더 올랐으면 1
         #     df['label'] = np.where(
         #         (df['pullback_zscore'] <= -0.3) &   # 평소 대비 더 눌린 상태
         #         (df['excess_5d'] >= 0.01),           # 나스닥 대비 +2% 초과수익
         #         1, 0
         #     )
-            
             print("양성 비율:", df['label'].mean())
         else:
             # 라벨이 없으므로 -1로 초기화
