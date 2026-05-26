@@ -40,7 +40,7 @@ if gpus:
         tf.config.experimental.set_memory_growth(gpu, True)
 
 # df = pd.read_csv("feature__indicator20260518.csv")
-df = pd.read_csv("feature__indicator_lstm20260522.csv")
+df = pd.read_csv("feature__indicator_lstm20260526.csv")
 
 df['date'] = pd.to_datetime(df['date'])
 

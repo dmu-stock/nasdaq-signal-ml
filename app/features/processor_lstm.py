@@ -112,34 +112,25 @@ class FeatureProcessorLSTM:
             df['volume_shock'] = df.groupby('ticker')['volume_z'].transform(lambda x: x.rolling(3).max())
             
             # 20일선 수급 지표
-            df['volume_zscore_20'] = (df['volume'] - df.groupby('ticker')['volume'].transform(lambda x: x.rolling(20).mean())) / (df.groupby('ticker')['volume'].transform(lambda x: x.rolling(20).std()) + 1e-9)
-            
-            # 60일 장기 수급 지표 (3달 평균 대비 찐 고래 진입 확인용)
+            df['volume_zscore_20'] = (df['volume'] - df.groupby('ticker')['volume'].transform(lambda x: x.rolling(20).mean())) / (df.groupby('ticker')['volume'].transform(lambda x: x.rolling(20).std()) + 1e-9)            
+            # 60일 장기 수급 지표
             df['volume_zscore_60'] = (df['volume'] - df.groupby('ticker')['volume'].transform(lambda x: x.rolling(60).mean())) / (df.groupby('ticker')['volume'].transform(lambda x: x.rolling(60).std()) + 1e-9)
         # ---------------------------
         # 4. 로그수익률 및 모멘텀
         # ---------------------------
         df['log_return'] = np.log(df['adj_close']) - np.log(df.groupby('ticker')['adj_close'].shift(1))
 
+        #로그리턴 차분값 평균
         df['momentum_3'] = df.groupby('ticker')['log_return'].transform(lambda x: x.rolling(3).sum())
         df['momentum_5'] = df.groupby('ticker')['log_return'].transform(lambda x: x.rolling(5).sum())
-
         df['momentum_20'] = df.groupby('ticker')['log_return'].transform(lambda x: x.rolling(20).sum())
         df['momentum_60'] = df.groupby('ticker')['log_return'].transform(lambda x: x.rolling(60).sum())
 
-        df['momentum_accel_3'] = (
-            df.groupby('ticker')['momentum_3']
-            .transform(lambda x: x.diff().rolling(3).mean())
-        )
-
-        df['momentum_accel_5'] = (
-            df.groupby('ticker')['momentum_5']
-            .transform(lambda x: x.diff().rolling(5).mean())
-        )
-        df['momentum_accel_20'] = (
-            df.groupby('ticker')['momentum_20']
-            .transform(lambda x: x.diff().rolling(20).mean())
-        )
+        # 가속도
+        df['momentum_accel_3'] = df.groupby('ticker')['momentum_3'].transform(lambda x: x.diff().rolling(3).mean())
+        df['momentum_accel_5'] = df.groupby('ticker')['momentum_5'].transform(lambda x: x.diff().rolling(5).mean())
+        df['momentum_accel_20'] = df.groupby('ticker')['momentum_20'].transform(lambda x: x.diff().rolling(20).mean())
+        
         
         # 캔들 구조 변수
         df['candle_body'] = (df['adj_close'] - df['open']) / (df['open'] + 1e-9)
@@ -173,27 +164,55 @@ class FeatureProcessorLSTM:
         # ---------------------------------------------------
 
         if not is_inference:
-            # 1. 내일 종가(t1), 모레 종가(t2), 글피 종가(t3)를 미래에서 정확히 당겨오기
+            TP = 0.025   # 익절
+            SL = -0.04   # 손절
+
+            # 미래 종가
             df['close_t1'] = df.groupby('ticker')['adj_close'].shift(-1)
             df['close_t2'] = df.groupby('ticker')['adj_close'].shift(-2)
             df['close_t3'] = df.groupby('ticker')['adj_close'].shift(-3)
 
-            # 2. 오늘 종가(adj_close) 대비 미래 각 영업일 종가의 수익률 계산
+            # 오늘 종가 대비 미래 수익률
             df['return_t1'] = (df['close_t1'] - df['adj_close']) / df['adj_close']
             df['return_t2'] = (df['close_t2'] - df['adj_close']) / df['adj_close']
             df['return_t3'] = (df['close_t3'] - df['adj_close']) / df['adj_close']
 
             # 3. 미래 3일의 '종가 기준 최고 수익률'만 쏙 뽑아내기
-            df['max_return_3d'] = df[['return_t1', 'return_t2', 'return_t3']].max(axis=1)
+            # df['max_return_3d'] = df[['return_t1', 'return_t2', 'return_t3']].max(axis=1)
+            # df['min_return_3d'] = df[['return_t1', 'return_t2', 'return_t3']].min(axis=1)
+
+            def make_label(row):
+                future_returns = [
+                    row['return_t1'],
+                    row['return_t2'],
+                    row['return_t3']
+                ]
+
+                for r in future_returns:
+
+                    # 미래 데이터 부족한 경우 skip
+                    if pd.isna(r):
+                        continue
+
+                    # 익절 먼저 도달 → 성공
+                    if r >= TP:
+                        return 1
+
+                    # 손절 먼저 도달 → 실패
+                    if r <= SL:
+                        return 0
+
+                # 3일 내 둘 다 안 나오면 실패
+                return 0
 
             # 4. 라벨링: 3일 중 한 번이라도 종가 기준으로 +2.5% 이상 올랐으면 1, 아니면 0
-            df['label'] = np.where(df['max_return_3d'] >= 0.025, 1, 0)
+            df['label'] = df.apply(make_label, axis=1)
         
         # ---------------------------------------------------
         # 6. 컬럼 필터링 및 데이터 동적 정리
         # ---------------------------------------------------
         meta_cols = ['ticker', 'date']
-        feature_cols = LSTM_FEATURE_COLS
+        feature_cols = LSTM_FEATURE_COLS.copy()
 
         # 학습 모드일 때만 'label'을 피처 명단에 결합
         if not is_inference:
