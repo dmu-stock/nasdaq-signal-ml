@@ -34,7 +34,7 @@ for t in [0.45, 0.50, 0.55, 0.58, 0.60, 0.65]:
 # ---------------------------------------------------
 # AND 게이트 앙상블
 # ---------------------------------------------------
-LGBM_THRESHOLD = 0.48
+LGBM_THRESHOLD = 0.55
 LSTM_THRESHOLD = 0.60
 
 baseline = ensemble_df['actual'].mean()
@@ -42,7 +42,7 @@ baseline = ensemble_df['actual'].mean()
 prob_top3_actuals = []
 prob_top5_actuals = []
 
-for date, group in ensemble_df.sort_values(['date'], ascending=[True, False]).groupby('date'):
+for date, group in ensemble_df.groupby('date'):
     filtered = group[
         (group['prob_lgb']  >= LGBM_THRESHOLD) &
         (group['prob_lstm'] >= LSTM_THRESHOLD)
