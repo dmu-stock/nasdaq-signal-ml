@@ -42,7 +42,7 @@ baseline = ensemble_df['actual'].mean()
 prob_top3_actuals = []
 prob_top5_actuals = []
 
-for date, group in ensemble_df.sort_values(['date', 'final_prob'], ascending=[True, False]).groupby('date'):
+for date, group in ensemble_df.sort_values(['date'], ascending=[True, False]).groupby('date'):
     filtered = group[
         (group['prob_lgb']  >= LGBM_THRESHOLD) &
         (group['prob_lstm'] >= LSTM_THRESHOLD)

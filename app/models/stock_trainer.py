@@ -11,6 +11,7 @@ from sklearn.metrics import (
     accuracy_score,
     roc_auc_score
 )
+from sklearn.calibration import CalibratedClassifierCV
 
 
 def walk_forward_eval(df: pd.DataFrame, feature_cols: list, target_col: str) -> pd.DataFrame:
@@ -139,13 +140,30 @@ model.fit(
 print(f"\n최적 트리 수: {model.best_iteration_}")
 joblib.dump(model, 'best_lgbm_model.pkl')
 
+
+# -----------------------------
+# 보정
+# -----------------------------
+calibrated = CalibratedClassifierCV(model, method='isotonic', cv='prefit')
+calibrated.fit(X_val, y_val)
+joblib.dump(calibrated, 'best_lgbm_model.pkl')  # 같은 파일명으로 덮어쓰기
+
+# 보정 후 분포 확인
+cal_prob = calibrated.predict_proba(X_test)[:, 1]
+print("\n===== Calibrated Probability Distribution =====")
+for t in [0.40, 0.45, 0.50, 0.55, 0.60, 0.65]:
+    n = (cal_prob >= t).sum()
+    print(f"  >= {t:.2f}: {n:>5}개  ({n/len(cal_prob)*100:.1f}%)")
+
 # -----------------------------
 # 예측
 # -----------------------------
 pred = model.predict(X_test)
 
+
 # 상승 확률
-pred_prob = model.predict_proba(X_test)[:, 1]
+# pred_prob = model.predict_proba(X_test)[:, 1]
+pred_prob = calibrated.predict_proba(X_test)[:, 1]
 
 # 확률 분포 확인 (threshold 튜닝용)
 print("\n===== Probability Distribution =====")
@@ -153,7 +171,7 @@ for t in [0.40, 0.43, 0.45, 0.48, 0.50, 0.53, 0.55]:
     n = (pred_prob >= t).sum()
     print(f"  >= {t:.2f}: {n:>5}개  ({n/len(pred_prob)*100:.1f}%)")
 
-threshold = 0.48
+threshold = 0.55
 pred = (pred_prob >= threshold).astype(int)
 print(f"\n[사용 threshold: {threshold}]")
 
