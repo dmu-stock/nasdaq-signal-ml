@@ -84,6 +84,38 @@ class FeatureProcessor:
             df['volume_ma5'] = df['volume'].rolling(5).mean()
             df['volume_ratio'] = df['volume'] / (df['volume_ma5'] + 1e-9)
 
+            # ---------------------------
+            # MFI (Money Flow Index) 14일
+            # ---------------------------
+            df['typical_price'] = (df['high'] + df['low'] + df['adj_close']) / 3
+            df['raw_mf']        = df['typical_price'] * df['volume']
+
+            tp_diff = df.groupby('ticker')['typical_price'].diff()
+            df['positive_mf'] = df['raw_mf'].where(tp_diff > 0, 0)
+            df['negative_mf'] = df['raw_mf'].where(tp_diff < 0, 0)
+
+            pos_flow = df.groupby('ticker')['positive_mf'].transform(
+                lambda x: x.rolling(14).sum()
+            )
+            neg_flow = df.groupby('ticker')['negative_mf'].transform(
+                lambda x: x.rolling(14).sum()
+            )
+            df['mfi'] = 100 - (100 / (1 + pos_flow / (neg_flow + 1e-9)))
+
+            # ---------------------------
+            # OBV (On-Balance Volume) slope
+            # ---------------------------
+             # 가격 방향에 따라 +거래량 / -거래량 누적
+            price_diff = df.groupby('ticker')['adj_close'].diff()
+            obv_dir = price_diff.apply(lambda x: 1 if x > 0 else (-1 if x < 0 else 0))
+            df['obv'] = (obv_dir * df['volume']).groupby(df['ticker']).cumsum()
+
+            # 5일 변화량을 20일 표준편차로 나눠 정규화 → 스케일 무관
+            df['obv_slope_5'] = df.groupby('ticker')['obv'].transform(
+                lambda x: x.diff(5) / (x.rolling(20).std() + 1e-9)
+            )
+            
+
         # ---------------------------
         # 시장 대비 (Alpha)
         # ---------------------------

@@ -1,6 +1,7 @@
 import pandas as pd
 import os
 import numpy as np
+import shap
 import joblib
 from app.config.config import GBM_FEATURE_COLS
 import lightgbm as lgb
@@ -10,6 +11,7 @@ from sklearn.metrics import (
     accuracy_score,
     roc_auc_score
 )
+from sklearn.calibration import CalibratedClassifierCV
 
 
 def walk_forward_eval(df: pd.DataFrame, feature_cols: list, target_col: str) -> pd.DataFrame:
@@ -71,7 +73,7 @@ def walk_forward_eval(df: pd.DataFrame, feature_cols: list, target_col: str) -> 
 # -----------------------------
 # 데이터 로드
 # -----------------------------
-df_tech = pd.read_csv("feature__indicator_20260528.csv")
+df_tech = pd.read_csv("feature__indicator_20260529.csv")
 
 # 날짜 타입 변환
 df_tech['date'] = pd.to_datetime(df_tech['date'])
@@ -138,13 +140,30 @@ model.fit(
 print(f"\n최적 트리 수: {model.best_iteration_}")
 joblib.dump(model, 'best_lgbm_model.pkl')
 
+
+# -----------------------------
+# 보정
+# -----------------------------
+calibrated = CalibratedClassifierCV(model, method='sigmoid', cv='prefit')
+calibrated.fit(X_val, y_val)
+joblib.dump(calibrated, 'best_lgbm_model.pkl')  # 같은 파일명으로 덮어쓰기
+
+# 보정 후 분포 확인
+cal_prob = calibrated.predict_proba(X_test)[:, 1]
+print("\n===== Calibrated Probability Distribution =====")
+for t in [0.40, 0.45, 0.50, 0.55, 0.60, 0.65]:
+    n = (cal_prob >= t).sum()
+    print(f"  >= {t:.2f}: {n:>5}개  ({n/len(cal_prob)*100:.1f}%)")
+
 # -----------------------------
 # 예측
 # -----------------------------
 pred = model.predict(X_test)
 
+
 # 상승 확률
-pred_prob = model.predict_proba(X_test)[:, 1]
+# pred_prob = model.predict_proba(X_test)[:, 1]
+pred_prob = calibrated.predict_proba(X_test)[:, 1]
 
 # 확률 분포 확인 (threshold 튜닝용)
 print("\n===== Probability Distribution =====")
@@ -152,7 +171,7 @@ for t in [0.40, 0.43, 0.45, 0.48, 0.50, 0.53, 0.55]:
     n = (pred_prob >= t).sum()
     print(f"  >= {t:.2f}: {n:>5}개  ({n/len(pred_prob)*100:.1f}%)")
 
-threshold = 0.48
+threshold = 0.55
 pred = (pred_prob >= threshold).astype(int)
 print(f"\n[사용 threshold: {threshold}]")
 
@@ -168,6 +187,7 @@ print(f"ROC-AUC  : {roc_auc_score(y_test, pred_prob):.4f}")
 # -----------------------------
 # Feature Importance
 # -----------------------------
+
 importance_df = pd.DataFrame({
     'feature': feature_cols,
     'importance': model.feature_importances_
@@ -176,6 +196,29 @@ importance_df = pd.DataFrame({
 print("\n===== Feature Importance =====")
 print(importance_df)
 
+
+# -----------------------------
+# SHAP Feature Importance
+# -----------------------------
+explainer = shap.TreeExplainer(model)
+shap_values = explainer.shap_values(X_test)
+
+# LightGBM binary: shap_values가 list면 [1] (양성 클래스)
+sv = shap_values[1] if isinstance(shap_values, list) else shap_values
+
+shap_df = pd.DataFrame({
+    'feature':    feature_cols,
+    'mean_shap':  np.abs(sv).mean(axis=0)
+}).sort_values('mean_shap', ascending=False)
+
+print("\n===== SHAP Feature Importance =====")
+print(shap_df.to_string(index=False))
+
+weak = shap_df[shap_df['mean_shap'] < 0.001]['feature'].tolist()
+if weak:
+    print(f"\n[제거 후보] mean|SHAP| < 0.001: {weak}")
+else:
+    print("\n[제거 후보 없음] 모든 피처 기여 중")
 # -----------------------------
 # 예측 결과 저장
 # -----------------------------

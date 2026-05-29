@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from app.config.config import LSTM_FEATURE_COLS
+from app.config.config import LSTM_FEATURE_COLS,LSTM_TEST_FEATURE_COLS
 from app.features.base_processor import BaseFeatureProcessor
 
 
@@ -128,7 +128,64 @@ class FeatureProcessorLSTM(BaseFeatureProcessor):
         # ---------------------------
         # VIX가 개별 종목의 변동성에 비해 얼마나 과도한지 적은지
         df['vix_vs_stock_vol'] = df['vix'] / (df['volatility_5'] * 100 + 1e-9)
+        # ---------------------------
+        # test 피처 BMG 핵심 피처의 시계열 추가
+        # ---------------------------
+        
+        # rsi
+        delta = df.groupby('ticker')['adj_close'].diff()
+        
+        # 상승, 하락분 분리
+        gain = delta.clip(lower=0)
+        loss = -delta.clip(upper=0)
 
+        # 지수이동평균(.ewm)을 사용하여 와일더 평활화 구현
+        avg_gain = (
+            gain.groupby(df['ticker'])
+            .transform(lambda x: x.ewm(com=rsi_period - 1, adjust=False).mean())
+        )
+
+        avg_loss = (
+            loss.groupby(df['ticker'])
+            .transform(lambda x: x.ewm(com=rsi_period - 1, adjust=False).mean())
+        )
+
+        # RS 및 RSI 계산
+        rs = avg_gain / (avg_loss + 1e-9)
+        df['rsi'] = 100 - (100 / (1 + rs))
+
+        # MACD (이동평균 수렴 확산 지수) : 단기 이평선과 장기 이평선이 얼마나 빨리 멀어지는지(에너지)를 측정
+        short_ema = df.groupby('ticker')['adj_close'].transform(lambda x: x.ewm(span=12, adjust=False).mean())
+        long_ema = df.groupby('ticker')['adj_close'].transform(lambda x: x.ewm(span=26, adjust=False).mean())
+        df['macd'] = short_ema - long_ema
+        df['macd_signal'] = df.groupby('ticker')['macd'].transform(lambda x: x.ewm(span=9, adjust=False).mean())
+        df['macd_hist'] = df['macd'] - df['macd_signal']
+
+        # 거래량 흐름
+        df['volume_ma5'] = (
+                df.groupby('ticker')['volume']
+                .transform(lambda x: x.rolling(5).mean())
+            )
+        df['volume_ratio'] = df['volume'] / (df['volume_ma5'] + 1e-9)
+
+        # 최고가 대비 하락률 (High Drawdown)
+        df['max_20'] = df.groupby('ticker')['high'].transform(lambda x: x.rolling(20).max())
+        df['drawdown_20'] = (df['adj_close'] - df['max_20']) / df['max_20']
+
+        # 볼린저 밴드 %B
+        std = df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(20).std())
+        ma20 = df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(20).mean())
+        df['upper_band'] = ma20 + (std * 2)
+        df['lower_band'] = ma20 - (std * 2)
+        # 현재가가 밴드 내 어디 위치하는지 (0~1 사이 값)
+        df['bb_percent'] = (df['adj_close'] - df['lower_band']) / (df['upper_band'] - df['lower_band'])
+
+        df['price_position_52w'] = (
+        (df['adj_close'] - df.groupby('ticker')['adj_close'].transform(
+            lambda x: x.rolling(252).min())) /
+        (df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(252).max()) -
+        df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(252).min()) + 1e-9)
+        )
         
 
         # ---------------------------------------------------
@@ -143,6 +200,7 @@ class FeatureProcessorLSTM(BaseFeatureProcessor):
         # 6. 컬럼 필터링 및 데이터 동적 정리
         # ---------------------------------------------------
         meta_cols = ['ticker', 'date']
+        # feature_cols = LSTM_FEATURE_COLS.copy()
         feature_cols = LSTM_FEATURE_COLS.copy()
 
         # 학습 모드일 때만 'label'을 피처 명단에 결합
