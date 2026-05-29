@@ -13,6 +13,9 @@ def create_app() -> FastAPI:
         version="1.0.0"
     )
 
+    # SQLite 테이블 초기화 (stock_prices, member, member_stock)
+    init_db()
+
     # CORS 설정
     app.add_middleware(
         CORSMiddleware,
@@ -40,6 +43,5 @@ app = create_app()
 
 if __name__ == "__main__":
     import uvicorn
-    init_db()
     uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
    

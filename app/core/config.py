@@ -18,6 +18,7 @@ class Settings:
     chat_model: str
     embed_model: str
     chroma_dir: Path
+    news_csv_path: Path  # LLM 분석 입력용 (data/news_*.csv)
     market: str  # "us" | "kr"
 
 
@@ -28,6 +29,7 @@ def get_settings() -> Settings:
         chat_model=os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini").strip(),
         embed_model=os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small").strip(),
         chroma_dir=Path(os.getenv("CHROMA_DIR", str(ROOT / "chroma_db"))).resolve(),
+        news_csv_path=Path(os.getenv("NEWS_CSV_PATH", str(ROOT / "data" / "news_2025.csv"))).resolve(),
         market=os.getenv("MARKET", "us").strip().lower(),
     )
     if not s.openai_api_key:
