@@ -39,3 +39,23 @@ class BaseFeatureProcessor:
         df['label'] = df.apply(lambda row: self.make_label(row, tp), axis=1)
         print("양성 비율:", df['label'].mean())
         return df
+    
+    def _apply_lstm_labels(self, df, forward_days=20, top_pct=0.30):
+        df = df.copy()
+        
+        # 20일 후 수익률
+        df['_fwd'] = (
+            df.groupby('ticker')['adj_close'].shift(-forward_days)
+            / df['adj_close'] - 1
+        )
+        
+        # 날짜별 상위 30% → 1
+        df['label'] = (
+            df.groupby('date')['_fwd']
+            .transform(lambda x: x.rank(pct=True, method='average'))
+            >= (1 - top_pct)
+        ).astype(int)
+        
+        df = df.drop(columns=['_fwd'])
+        print(f"LSTM 라벨 양성 비율: {df['label'].mean():.4f}  (목표 ~{top_pct:.0%})")
+        return df

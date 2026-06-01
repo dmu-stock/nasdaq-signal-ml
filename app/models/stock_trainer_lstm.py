@@ -36,7 +36,7 @@ scaler_amp = torch.amp.GradScaler('cuda', enabled=use_amp)
 # ---------------------------------------------------
 # Data load
 # ---------------------------------------------------
-df = pd.read_csv("feature__indicator_lstm20260529.csv")
+df = pd.read_csv("feature__indicator_lstm20260601.csv")
 df['date'] = pd.to_datetime(df['date'])
 
 feature_cols = LSTM_FEATURE_COLS

@@ -194,7 +194,7 @@ class FeatureProcessorLSTM(BaseFeatureProcessor):
 
         if not is_inference:
             # 장중 저가 기준 SL + 종가 기준 TP (base_processor.make_label 사용)
-            df = self._apply_labels(df)
+            df = self._apply_lstm_labels(df)
         
         # ---------------------------------------------------
         # 6. 컬럼 필터링 및 데이터 동적 정리
