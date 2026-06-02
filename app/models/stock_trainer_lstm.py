@@ -10,7 +10,7 @@ random.seed(42)
 np.random.seed(42)
 torch.manual_seed(42)
 
-from app.config.config import LSTM_FEATURE_COLS,LSTM_TEST_FEATURE_COLS
+from app.config.config import LSTM_FEATURE_COLS
 from app.models.lstm_model import DualLSTMModel
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (
@@ -36,7 +36,7 @@ scaler_amp = torch.amp.GradScaler('cuda', enabled=use_amp)
 # ---------------------------------------------------
 # Data load
 # ---------------------------------------------------
-df = pd.read_csv("feature__indicator_lstm20260601.csv")
+df = pd.read_csv("feature__indicator_lstm20260602.csv")
 df['date'] = pd.to_datetime(df['date'])
 
 feature_cols = LSTM_FEATURE_COLS

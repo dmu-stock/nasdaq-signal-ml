@@ -73,7 +73,7 @@ def walk_forward_eval(df: pd.DataFrame, feature_cols: list, target_col: str) -> 
 # -----------------------------
 # 데이터 로드
 # -----------------------------
-df_tech = pd.read_csv("feature__indicator_20260601.csv")
+df_tech = pd.read_csv("feature__indicator_20260602.csv")
 
 # 날짜 타입 변환
 df_tech['date'] = pd.to_datetime(df_tech['date'])

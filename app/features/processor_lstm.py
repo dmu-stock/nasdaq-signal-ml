@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 from datetime import datetime
-from app.config.config import LSTM_FEATURE_COLS,LSTM_TEST_FEATURE_COLS
+from app.config.config import LSTM_FEATURE_COLS
 from app.features.base_processor import BaseFeatureProcessor
 
 

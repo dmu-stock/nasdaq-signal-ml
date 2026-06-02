@@ -34,6 +34,8 @@ def init_db():
         nasdaq_close REAL,          -- 나스닥 종가
         nasdaq_change_rate REAL,    -- 나스닥 등락률
         alpha REAL,           -- 시장 대비 초과수익률 (Rm - Rs)
+        vix REAL,               -- VIX 공포지수
+        tnx REAL,               -- 미국 10년물 국채금리
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(ticker, date) -- 동일 종목, 동일 날짜 데이터 중복 방지
     );

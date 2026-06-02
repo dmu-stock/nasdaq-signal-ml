@@ -34,20 +34,7 @@ LSTM_FEATURE_COLS = [
     # 시장 센티멘트 흐름
     'nasdaq_change_rate'
 ]
-LSTM_TEST_FEATURE_COLS = [
-    # GBM 핵심 피처의 시계열 (중복 없이)
-    'rsi',           # RSI 흐름
-    'macd_hist',     # MACD 흐름  
-    'volume_ratio',  # 거래량 흐름
-    'drawdown_20',   # 낙폭 흐름
-    'bb_percent',    # 밴드 위치 흐름
-    'return_5',      # 단기 수익률 흐름
-    'nasdaq_change_rate',  # 시장 흐름
-    # LSTM 고유 피처
-    'candle_body',   # 캔들 방향성
-    'high_low_spread',
-    'price_position_52w',  # 52주 위치 흐름
-]
+
 
 
 GBM_FEATURE_COLS = [
@@ -126,5 +113,37 @@ TICKERS = [
     "OKLO",
 
     # 기타 성장
-    "DASH", "SPOT", "TTD",
+    "DASH", 
+    "SPOT", 
+    "TTD",
+
+    "SMCI",   # Super Micro Computer — AI 서버
+    "ARM",    # ARM Holdings — AI 칩 설계
+    "WDC",    # Western Digital — SanDisk 모회사 (스토리지)
+    "STX",    # Seagate — 데이터센터 스토리지
+    "ASML",   # ASML — 반도체 장비 (AI 핵심 공급망)
+
+    # 원자력/에너지 (AI 데이터센터 전력 수요 수혜)
+    "VST",    # Vistra — 원자력+전력
+    "CEG",    # Constellation Energy — 원자력
+    "FSLR",   # First Solar — 태양광
+
+    # 핀테크 추가
+    "PYPL",   # PayPal
+    "AFRM",   # Affirm — BNPL
+    "NU",     # Nubank — 라틴 핀테크
+
+    # 헬스/바이오 (요즘 핫)
+    "HIMS",   # Hims & Hers — GLP-1 비만치료
+    "ISRG",   # Intuitive Surgical — 수술 로봇
+
+    # 소비자/소셜
+    "PINS",   # Pinterest
+    "LYFT",   # Lyft
+    "RBLX",   # Roblox
+
+    # SaaS
+    "INTU",   # Intuit
+    "WDAY",   # Workday
+    "TEAM",   # Atlassian
 ]
