@@ -40,7 +40,7 @@ class BaseFeatureProcessor:
         print("양성 비율:", df['label'].mean())
         return df
     
-    def _apply_lstm_labels(self, df, forward_days=20, top_pct=0.30):
+    def _apply_lstm_labels(self, df, forward_days=5, top_pct=0.30):
         df = df.copy()
         
         # 20일 후 수익률

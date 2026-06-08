@@ -36,7 +36,7 @@ scaler_amp = torch.amp.GradScaler('cuda', enabled=use_amp)
 # ---------------------------------------------------
 # Data load
 # ---------------------------------------------------
-df = pd.read_csv("feature__indicator_lstm20260602.csv")
+df = pd.read_csv("feature__indicator_lstm20260608.csv")
 df['date'] = pd.to_datetime(df['date'])
 
 feature_cols = LSTM_FEATURE_COLS
@@ -316,3 +316,7 @@ print(f"가드레일: 예측 확률 {CONFIDENCE_THRESHOLD} 이상만 진입")
 print(f"Top3 타율: {real_top3:.4f}  ({len(daily_top3_actuals)}회 진입)")
 print(f"Top5 타율: {real_top5:.4f}  ({len(daily_top5_actuals)}회 진입)")
 print(f"베이스라인 (시장 평균): {result_df['actual'].mean():.4f}")
+
+from sklearn.metrics import roc_auc_score
+print("정방향:", roc_auc_score(y_test, pred_prob))
+print("역방향:", roc_auc_score(y_test, 1 - pred_prob))

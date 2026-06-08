@@ -1,14 +1,14 @@
 LSTM_FEATURE_COLS = [
     
     # 'return_3',
-    'return_20',
+    # 'return_20',
 
     # ===== 추세 변화 =====
-    'momentum_3',
-    'momentum_20',          
-    'momentum_60',          
-    'momentum_accel_3',
-    'momentum_accel_20',
+    # 'momentum_3',
+    # 'momentum_20',          
+    # 'momentum_60',          
+    # 'momentum_accel_3',
+    # 'momentum_accel_20',
 
     # ===== 변동성 흐름 =====
     # 'atr_change',          
@@ -28,11 +28,11 @@ LSTM_FEATURE_COLS = [
     # ===== 시장 동조 =====
     # 'relative_strength',
     # 'high_breakout_20',
-    'high_breakout_60',
+    # 'high_breakout_60',
     # ===== 시장 지수 =====
     # 'vix_vs_stock_vol',
     # 시장 센티멘트 흐름
-    'nasdaq_change_rate'
+    # 'nasdaq_change_rate'
 ]
 
 
@@ -79,71 +79,39 @@ GBM_FEATURE_COLS = [
 ]
 
 TICKERS = [
-    # 반도체
-    "NVDA", "AMD", "AVGO", "MU", "QCOM", "TSM",
+    # AI 반도체 (핵심)
+    "NVDA", "AMD", "AVGO", "MU", "ARM", "SMCI",
 
     # 빅테크
-    "MSFT", "AMZN", "META", "GOOGL", "AAPL",
-    "TSLA", "NFLX", "ORCL", "CRM", "ADBE",
+    "MSFT", "META", "GOOGL", "AMZN", "AAPL", "TSLA", "NFLX",
 
-    # AI 인프라
-    "PLTR", 
-    "NOW",
-    # "CRWV",
-    "APP", "ANET",
+    # AI 인프라/소프트웨어
+    "PLTR", "NOW", "APP", "ANET", "CRM",
 
     # 클라우드/사이버
-    "CRWD", "PANW", "ZS", "NET", "DDOG", "SNOW",
+    "CRWD", "PANW", "DDOG", "NET",
 
-    # 핀테크/소비
-    "COIN", "HOOD", "SOFI", "SHOP", "MELI", "UBER", "ABNB",
+    # 전력 인프라 (AI 데이터센터 수혜)
+    "VST",    # Vistra — 원자력
+    "CEG",    # Constellation Energy — 원자력
+    "GEV",    # GE Vernova — 전력
+    "VRT",    # Vertiv — 데이터센터 냉각
+
+    # 핀테크/크립토
+    "COIN", "HOOD", "NU", "AFRM",
+
+    # 헬스테크
+    "HIMS",   # GLP-1 수혜
 
     # 우주/방산
-    "RKLB",   # 로켓랩
-    "ASTS",   # AST SpaceMobile
-    "LMT",    # 록히드마틴
+    "RKLB", "ASTS",
 
-    # 에너지/인프라
-    "GEV",    # GE Vernova
-    "VRT",    # Vertiv
-    "NEE",    # NextEra Energy
+    # 퀀텀/소형 원자력
+    "IONQ", "OKLO",
 
-    # 퀀텀
-    "IONQ",
-    "OKLO",
+    # 소비/성장
+    "UBER", "SPOT", "DASH", "RBLX",
 
-    # 기타 성장
-    "DASH", 
-    "SPOT", 
-    "TTD",
-
-    "SMCI",   # Super Micro Computer — AI 서버
-    "ARM",    # ARM Holdings — AI 칩 설계
-    "WDC",    # Western Digital — SanDisk 모회사 (스토리지)
-    "STX",    # Seagate — 데이터센터 스토리지
-    "ASML",   # ASML — 반도체 장비 (AI 핵심 공급망)
-
-    # 원자력/에너지 (AI 데이터센터 전력 수요 수혜)
-    "VST",    # Vistra — 원자력+전력
-    "CEG",    # Constellation Energy — 원자력
-    "FSLR",   # First Solar — 태양광
-
-    # 핀테크 추가
-    "PYPL",   # PayPal
-    "AFRM",   # Affirm — BNPL
-    "NU",     # Nubank — 라틴 핀테크
-
-    # 헬스/바이오 (요즘 핫)
-    "HIMS",   # Hims & Hers — GLP-1 비만치료
-    "ISRG",   # Intuitive Surgical — 수술 로봇
-
-    # 소비자/소셜
-    "PINS",   # Pinterest
-    "LYFT",   # Lyft
-    "RBLX",   # Roblox
-
-    # SaaS
-    "INTU",   # Intuit
-    "WDAY",   # Workday
-    "TEAM",   # Atlassian
+    # 스토리지 (AI 데이터)
+    "WDC", "STX",
 ]
