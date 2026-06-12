@@ -187,7 +187,66 @@ class FeatureProcessorLSTM(BaseFeatureProcessor):
         df.groupby('ticker')['adj_close'].transform(lambda x: x.rolling(252).min()) + 1e-9)
         )
         
+        # ---------------------------
+        # 시장 모멘텀 팩터 (레짐 인지)
+        # "모멘텀 전략이 현재 작동 중인가" = 추세장 vs 반전장 신호
+        # ---------------------------
+        # 어제까지의 20일 모멘텀 (오늘 정보 사용 안 함 → 인과적)
+        df['_mom_lag'] = df.groupby('ticker')['momentum_20'].shift(1)
 
+        def _mom_factor(g):
+            # g: 같은 날짜의 전체 종목
+            valid = g['_mom_lag'].notna()
+            if valid.sum() < 5:
+                return np.nan
+            hi_th = g['_mom_lag'].quantile(0.7)   # 모멘텀 상위 30%
+            lo_th = g['_mom_lag'].quantile(0.3)   # 모멘텀 하위 30%
+            hi = g.loc[g['_mom_lag'] >= hi_th, 'return_1'].mean()
+            lo = g.loc[g['_mom_lag'] <= lo_th, 'return_1'].mean()
+            return hi - lo   # 양수=모멘텀 작동(추세장), 음수=반전장
+
+        # 날짜별 팩터 수익률 (전 종목 공통 신호)
+        factor = df.groupby('date', group_keys=False).apply(_mom_factor).sort_index()
+        factor_20 = factor.rolling(20).sum()    # 20일 누적 → 레짐 신호 증폭
+
+        df['mom_factor']   = df['date'].map(factor)
+        df['mom_factor_20'] = df['date'].map(factor_20)
+
+        df['momentum_regime_adj'] = df['momentum_20'] * np.sign(df['mom_factor_20'])
+
+        df = df.drop(columns=['_mom_lag'])
+
+        # ---------------------------
+        # ADX (추세 강도) — 레짐 인지
+        # ---------------------------
+        high, low, close = df['high'], df['low'], df['adj_close']
+        prev_close = df.groupby('ticker')['adj_close'].shift(1)
+
+        # True Range (이미 tr 있으면 재사용 가능)
+        tr_adx = np.maximum(high - low,
+                 np.maximum((high - prev_close).abs(), (low - prev_close).abs()))
+
+        # +DM, -DM
+        up_move = high - df.groupby('ticker')['high'].shift(1)
+        dn_move = df.groupby('ticker')['low'].shift(1) - low
+        plus_dm  = np.where((up_move > dn_move) & (up_move > 0), up_move, 0.0)
+        minus_dm = np.where((dn_move > up_move) & (dn_move > 0), dn_move, 0.0)
+
+        df['_plus_dm']  = plus_dm
+        df['_minus_dm'] = minus_dm
+        df['_tr_adx']   = tr_adx
+
+        # 14일 평활 (Wilder)
+        atr14 = df.groupby('ticker')['_tr_adx'].transform(lambda x: x.ewm(alpha=1/14, adjust=False).mean())
+        pdi = 100 * df.groupby('ticker')['_plus_dm'].transform(lambda x: x.ewm(alpha=1/14, adjust=False).mean()) / (atr14 + 1e-9)
+        mdi = 100 * df.groupby('ticker')['_minus_dm'].transform(lambda x: x.ewm(alpha=1/14, adjust=False).mean()) / (atr14 + 1e-9)
+
+        dx = 100 * (pdi - mdi).abs() / (pdi + mdi + 1e-9)
+        df['dx'] = dx
+        df['adx'] = df.groupby('ticker')['dx'].transform(lambda x: x.ewm(alpha=1/14, adjust=False).mean())
+        df = df.drop(columns=['_plus_dm', '_minus_dm', '_tr_adx', 'dx'])
+
+        
         # ---------------------------------------------------
         # 미래 3영업일 종가 기준 라벨링
         # ---------------------------------------------------

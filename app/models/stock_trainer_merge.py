@@ -35,7 +35,7 @@ for t in [0.45, 0.50, 0.55, 0.58, 0.60, 0.65]:
 # AND 게이트 앙상블
 # ---------------------------------------------------
 LGBM_THRESHOLD = 0.54
-LSTM_THRESHOLD = 0.60
+LSTM_THRESHOLD = 0.49
 
 baseline = ensemble_df['actual'].mean()
 

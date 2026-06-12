@@ -1,11 +1,11 @@
 LSTM_FEATURE_COLS = [
     
     # 'return_3',
-    # 'return_20',
+    'return_20',
 
     # ===== 추세 변화 =====
     # 'momentum_3',
-    # 'momentum_20',          
+    'momentum_20',          
     # 'momentum_60',          
     # 'momentum_accel_3',
     # 'momentum_accel_20',
@@ -31,8 +31,14 @@ LSTM_FEATURE_COLS = [
     # 'high_breakout_60',
     # ===== 시장 지수 =====
     # 'vix_vs_stock_vol',
+
     # 시장 센티멘트 흐름
     # 'nasdaq_change_rate'
+
+    # 레짐 인지 (핵심)
+    'momentum_regime_adj',
+    'mom_factor_20',
+
 ]
 
 
