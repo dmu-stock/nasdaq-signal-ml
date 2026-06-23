@@ -272,7 +272,8 @@ app/
 │   ├── lstm_model.py           # PyTorch DualLSTMModel 아키텍처
 │   ├── stock_trainer.py        # LightGBM 학습 스크립트
 │   ├── stock_trainer_lstm.py   # LSTM 학습 스크립트 (PyTorch)
-│   └── stock_trainer_merge.py  # 앙상블 평가 스크립트
+│   ├── stock_trainer_merge.py  # 앙상블 단일분할 평가
+│   └── ensemble_wf.py          # 앙상블 Walk-Forward 검증 (재정렬 방식)
 │
 └── pipeline/
     └── inference_pipeline.py   # 실전 추론 파이프라인 (매일 실행)
@@ -286,7 +287,7 @@ app/
 - `n_estimators=2000`, `learning_rate=0.005`
 - `class_weight=None`, `scale_pos_weight=2.0`
 - Early stopping on validation AUC
-- 주요 피처: `nasdaq_change_rate`, `tr_5`, `return_5`, `drawdown_20`, `macd_hist`
+- 주요 피처 (SHAP): `tr_5`, `tr_20`, `nasdaq_change_rate`, `volume_ratio`, `rsi`
 
 ### Dual-Input LSTM (PyTorch)
 
@@ -331,21 +332,24 @@ python -m app.pipeline.inference_pipeline
 ```
 
 **실행 순서:**
-1. `yfinance`로 전체 종목 2년치 주가 수집 (VIX 포함)
+1. `yfinance`로 전체 종목 4년치 주가 수집 (VIX, TNX 포함)
 2. VIX >= 30 이면 매수 중단 (극공포 구간 가드레일)
 3. GBM/LSTM 피처 엔지니어링
 4. 종목별 LightGBM + LSTM 추론
-5. AND 게이트 필터 → 상위 3개 출력
+5. GBM 후보 선정(`prob_lgb >= 0.50`, 상위 8) → LSTM 재정렬 → 상위 3개 출력
 
 **출력 예시:**
 ```
 =============================================
-[주먹봇] 2026-05-28 매수 시그널
+[주먹봇] 2026-06-23 매수 시그널
 =============================================
-진입: NVDA  score=0.5123 [LGBM=0.4921 / LSTM=0.6234]
-진입: META  score=0.4987 [LGBM=0.4856 / LSTM=0.6102]
+진입: WDC   score=0.5601 [LGBM=0.6122 / LSTM=0.5162]
+진입: STX   score=0.5578 [LGBM=0.6087 / LSTM=0.5146]
+진입: HOOD  score=0.5535 [LGBM=0.6073 / LSTM=0.5086]
 =============================================
 ```
+> GBM이 0.50 이상 후보 8개를 추리고(HIMS·WDC·STX·HOOD·ARM·ASTS·RKLB·PLTR),
+> 그 중 LSTM 순위 상위 3개를 최종 선택. GBM 1위 HIMS는 LSTM이 낮아 탈락.
 
 ---
 
