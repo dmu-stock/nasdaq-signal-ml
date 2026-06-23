@@ -38,3 +38,14 @@ db/
 chroma_db/
 sentiment_cache.json
 
+# 논문/문서 생성 스크립트 및 산출물 (로컬 작업용, 코드베이스 외)
+make_doc.py
+make_paper.py
+make_pdf.py
+make_fig.py
+*.docx
+*.pdf
+*.pptx
+fig1_regime.png
+LSTM_레짐반전_정리.md
+

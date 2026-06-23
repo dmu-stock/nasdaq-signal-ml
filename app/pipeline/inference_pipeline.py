@@ -12,10 +12,10 @@ from app.features.processor_lstm import FeatureProcessorLSTM
 # ---------------------------------------------------
 # 가드레일 & 타임프레임 스펙
 # ---------------------------------------------------
-LGBM_THRESHOLD = 0.54 
-LSTM_THRESHOLD = 0.49
-SEQ_LEN_20 = 20
-SEQ_LEN_60 = 60
+GBM_MIN     = 0.50   # GBM 최소 기준 (이 아래는 후보 제외 → 현금 보유 여지)
+TOP_N_GBM   = 8      # GBM 상위 후보 풀 크기 (시장 추천 3종목의 2~3배)
+SEQ_LEN_20  = 20
+SEQ_LEN_60  = 60
 
 print("듀얼 파이프라인 실전 추론")
 
@@ -123,19 +123,18 @@ for ticker in TICKERS:
     })
 
 # ===================================================
-# 5. AND 가드레일 필터 & 정렬
+# 5. 후보 선정 (GBM 후보 → LSTM 재정렬)
+#    1단계: GBM_MIN 이상인 종목 중 prob_lgb 상위 TOP_N_GBM 후보
+#    2단계: 그 후보 중 prob_lstm 상위 3종목 최종 선택
 # ===================================================
 inference_df = pd.DataFrame(results)
 
-inference_df['signal'] = (
-    (inference_df['prob_lgb']  >= LGBM_THRESHOLD) &
-    (inference_df['prob_lstm'] >= LSTM_THRESHOLD)
+candidates = (
+    inference_df[inference_df['prob_lgb'] >= GBM_MIN]
+    .sort_values('prob_lgb', ascending=False)
+    .head(TOP_N_GBM)
 )
-
-valid_picks = (
-    inference_df[inference_df['signal']]
-    .sort_values('final_prob', ascending=False)
-)
+valid_picks = candidates.sort_values('prob_lstm', ascending=False).head(3)
 
 # ===================================================
 # 6. 최종 출력
@@ -144,22 +143,21 @@ print("\n=============================================")
 print(f"[주먹봇] {datetime.now().strftime('%Y-%m-%d')} 매수 시그널")
 print("=============================================")
 if not valid_picks.empty:
-    for _, row in valid_picks.head(3).iterrows():
+    for _, row in valid_picks.iterrows():
         print(
             f"진입: {row['ticker']}  score={row['final_prob']:.4f} "
             f"[LGBM={row['prob_lgb']:.4f} / LSTM={row['prob_lstm']:.4f}]"
         )
 else:
-    print("가드레일 통과 종목 없음 — 현금 보유 권장")
+    print(f"GBM {GBM_MIN} 이상 종목 없음 — 현금 보유 권장")
 print("=============================================\n")
 
-print(f"추론 종목 수: {len(inference_df)}")
-print(inference_df.to_string(index=False))
+# 후보 풀 (GBM 통과) 표시
+print(f"GBM 후보 풀 (prob_lgb >= {GBM_MIN}, 상위 {TOP_N_GBM}):")
+if candidates.empty:
+    print("  없음")
+else:
+    print(candidates.sort_values('prob_lstm', ascending=False).to_string(index=False))
 
-for _, row in inference_df.iterrows():
-    if not row['signal']:
-        print(
-            f"탈락: {row['ticker']}  "
-            f"LGBM {row['prob_lgb']:.4f} ({'OK' if row['prob_lgb'] >= LGBM_THRESHOLD else 'NG'})  "
-            f"LSTM {row['prob_lstm']:.4f} ({'OK' if row['prob_lstm'] >= LSTM_THRESHOLD else 'NG'})"
-        )
+print(f"\n추론 종목 수: {len(inference_df)}")
+print(inference_df.sort_values('prob_lgb', ascending=False).to_string(index=False))

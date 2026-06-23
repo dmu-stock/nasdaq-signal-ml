@@ -170,32 +170,61 @@ def lstm_fold(tr_end, te_end):
 # ---------------------------------------------------
 # 폴드 루프
 # ---------------------------------------------------
-print("===== 앙상블 Walk-Forward =====")
-print(f"가드레일: LGBM >= {LGBM_TH}, LSTM >= {LSTM_TH}\n")
-rows = []
+print("===== 앙상블 Walk-Forward (GBM 후보 → LSTM 재정렬) =====\n")
+
+# 폴드별 예측을 한 번만 계산해서 재사용 (TOP_N 여러 개 비교용)
+fold_data = []
 for tr_end, te_end in FOLDS:
     g = gbm_fold(tr_end, te_end)
     l = lstm_fold(tr_end, te_end)
     if g is None or l is None:
         print(f"{tr_end} ~ {te_end}  스킵"); continue
-
     e = pd.merge(g, l, on=['date', 'ticker'], how='inner')
-    e['final'] = 2*(e['prob_lgb']*e['prob_lstm']) / (e['prob_lgb']+e['prob_lstm']+1e-9)
+    fold_data.append((tr_end, te_end, e))
+
+GBM_MIN = 0.50   # 실전 파이프라인과 동일: GBM 최소 기준 (현금 보유 여지)
+
+for TOP_N_GBM in [5, 6, 8, 10]:
+    rows = []
+    for tr_end, te_end, e in fold_data:
+        base = e['label'].mean()
+        # GBM_MIN 이상 중 상위 N개 후보 → 그 안에서 LSTM 순위 상위 3개
+        rer, gbm_only, lstm_only = [], [], []
+        for date, grp in e.groupby('date'):
+            pool = grp[grp['prob_lgb'] >= GBM_MIN]
+            cand = pool.sort_values('prob_lgb', ascending=False).head(TOP_N_GBM)
+            r3 = cand.sort_values('prob_lstm', ascending=False).head(3)
+            rer += r3['label'].tolist()
+            gbm_only += grp.sort_values('prob_lgb', ascending=False).head(3)['label'].tolist()
+            lstm_only += grp.sort_values('prob_lstm', ascending=False).head(3)['label'].tolist()
+
+        hit   = np.mean(rer) if rer else 0.0
+        g_hit = np.mean(gbm_only) if gbm_only else 0.0
+        l_hit = np.mean(lstm_only) if lstm_only else 0.0
+        mult  = hit/base if base > 0 else 0
+        rows.append((hit, base, mult, g_hit, l_hit, len(rer)))
+
+    hits  = [r[0] for r in rows]
+    mults = [r[2] for r in rows]
+    g_avg = np.mean([r[3] for r in rows])
+    l_avg = np.mean([r[4] for r in rows])
+    n_tot = sum(r[5] for r in rows)
+    print(f"[TOP_N={TOP_N_GBM}]  재정렬 {np.mean(hits):.4f} ({np.mean(mults):.2f}배, "
+          f"편차 {np.std(mults):.3f}, 진입 {n_tot}회)  | GBM단독 {g_avg:.4f}  LSTM단독 {l_avg:.4f}")
+
+# ---------------------------------------------------
+# 최종 채택 설정(TOP_N=8) 폴드별 상세 — 논문 표용
+# ---------------------------------------------------
+print("\n===== 최종 설정 폴드별 상세 (TOP_N=8, GBM_MIN=0.50) =====")
+TOP_N_GBM = 8
+for tr_end, te_end, e in fold_data:
     base = e['label'].mean()
-
-    top3 = []
+    rer, gbm_only, lstm_only = [], [], []
     for date, grp in e.groupby('date'):
-        f = grp[(grp['prob_lgb'] >= LGBM_TH) & (grp['prob_lstm'] >= LSTM_TH)]
-        f = f.sort_values('final', ascending=False).head(3)
-        if not f.empty:
-            top3 += f['label'].tolist()
-    hit = np.mean(top3) if top3 else 0.0
-    mult = hit/base if base > 0 else 0
-    rows.append((f'{tr_end}~{te_end}', hit, len(top3), base, mult))
-    print(f"{tr_end} ~ {te_end}  Top3={hit:.4f}  ({len(top3)}회)  베이스{base:.4f}  → {mult:.2f}배")
-
-if rows:
-    hits  = [r[1] for r in rows]
-    mults = [r[4] for r in rows]
-    print(f"\n평균 Top3 타율: {np.mean(hits):.4f}")
-    print(f"평균 배수: {np.mean(mults):.2f}배  (편차 {np.std(mults):.3f})")
+        pool = grp[grp['prob_lgb'] >= GBM_MIN]
+        cand = pool.sort_values('prob_lgb', ascending=False).head(TOP_N_GBM)
+        rer += cand.sort_values('prob_lstm', ascending=False).head(3)['label'].tolist()
+        gbm_only += grp.sort_values('prob_lgb', ascending=False).head(3)['label'].tolist()
+        lstm_only += grp.sort_values('prob_lstm', ascending=False).head(3)['label'].tolist()
+    print(f"{tr_end}~{te_end}  재정렬 {np.mean(rer):.4f}  GBM단독 {np.mean(gbm_only):.4f}  "
+          f"LSTM단독 {np.mean(lstm_only):.4f}  베이스 {base:.4f}  (진입 {len(rer)}회)")
