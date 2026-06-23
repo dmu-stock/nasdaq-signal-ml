@@ -25,9 +25,8 @@ from sklearn.metrics import roc_auc_score
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 use_amp = device.type == 'cuda'
 
-# 최신 CSV 파일명으로 맞추세요
-GBM_CSV  = "feature__indicator_20260608.csv"
-LSTM_CSV = "feature__indicator_lstm20260608.csv"
+GBM_CSV  = "feature__indicator_20260623.csv"
+LSTM_CSV = "feature__indicator_lstm20260623.csv"
 
 LGBM_TH = 0.54
 LSTM_TH = 0.49

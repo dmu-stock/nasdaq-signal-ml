@@ -14,6 +14,7 @@ __pycache__/
 
 # 환경 변수 및 보안
 .env
+.env.example
 .flaskenv
 
 # 데이터 및 로그 
@@ -36,3 +37,4 @@ Thumbs.db
 db/
 chroma_db/
 sentiment_cache.json
+

@@ -16,8 +16,7 @@ from sklearn.utils.class_weight import compute_class_weight
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 use_amp = device.type == 'cuda'
 
-# ⚠️ stock_trainer_lstm.py 에서 쓰는 최신 CSV 파일명으로 맞추세요
-CSV = "feature__indicator_lstm20260608.csv"
+CSV = "feature__indicator_lstm20260623.csv"
 df = pd.read_csv(CSV)
 df['date'] = pd.to_datetime(df['date'])
 feat, tgt = LSTM_FEATURE_COLS, 'label'
