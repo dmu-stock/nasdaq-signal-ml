@@ -164,7 +164,8 @@ def lstm_fold(tr_end, te_end):
             a, b = a.to(device), b.to(device)
             with torch.autocast(device.type, enabled=use_amp):
                 tp += torch.sigmoid(model(a, b)).cpu().tolist()
-    return pd.DataFrame({'date': dts[tem], 'ticker': tks[tem], 'prob_lstm': tp})
+    return pd.DataFrame({'date': dts[tem], 'ticker': tks[tem],
+                         'prob_lstm': tp, 'label_lstm': y[tem]})
 
 
 # ---------------------------------------------------
@@ -215,6 +216,15 @@ for TOP_N_GBM in [5, 6, 8, 10]:
 # ---------------------------------------------------
 # 최종 채택 설정(TOP_N=8) 폴드별 상세 — 논문 표용
 # ---------------------------------------------------
+# ---------------------------------------------------
+# 같은 4폴드에서 모델별 AUC (각 모델은 자기 라벨 기준) — 논문 표 1용
+# ---------------------------------------------------
+print("\n===== 모델별 Walk-Forward AUC (동일 폴드) =====")
+for tr_end, te_end, e in fold_data:
+    gbm_auc  = roc_auc_score(e['label'], e['prob_lgb'])
+    lstm_auc = roc_auc_score(e['label_lstm'], e['prob_lstm'])
+    print(f"{tr_end}~{te_end}  GBM_AUC {gbm_auc:.4f}  LSTM_AUC {lstm_auc:.4f}")
+
 print("\n===== 최종 설정 폴드별 상세 (TOP_N=8, GBM_MIN=0.50) =====")
 TOP_N_GBM = 8
 for tr_end, te_end, e in fold_data:
