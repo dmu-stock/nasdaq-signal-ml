@@ -63,6 +63,24 @@ def get_nasdaq_data(period: str = "4y") ->  Optional[pd.DataFrame]:
 
     return nasdaq[['date', 'nasdaq_close', 'nasdaq_change_rate']]
 
+
+def get_index_data(symbol: str, period: str = "4y") -> Optional[pd.DataFrame]:
+    """범용 시장지수 수집 (S&P=^GSPC 등). get_nasdaq_data와 동일 구조·컬럼명(nasdaq_close 등)을
+    유지해 하위 코드 호환. 값만 지정한 지수로 채운다. S&P 종목 실험용 분기."""
+    idx = yf.download(symbol, period=period, interval="1d",
+                      auto_adjust=False, progress=False)
+    if idx.empty:
+        print(f"[경고] {symbol}: 수집된 데이터가 없습니다.")
+        return None
+    if isinstance(idx.columns, pd.MultiIndex):
+        idx.columns = idx.columns.get_level_values(0)
+    idx = idx.reset_index()
+    idx["Date"] = pd.to_datetime(idx["Date"]).dt.tz_localize(None).dt.date
+    idx['nasdaq_change_rate'] = idx['Adj Close'].pct_change()
+    idx = idx.rename(columns={'Date': 'date', 'Adj Close': 'nasdaq_close'})
+    idx = idx.sort_values(["date"]).reset_index(drop=True)
+    return idx[['date', 'nasdaq_close', 'nasdaq_change_rate']]
+
 # -------------------------------------------------
 # 수집 대상: vix 지수, 10년물 미국 국채금리 수집
 # -------------------------------------------------
@@ -221,7 +239,14 @@ def fetch_all_stocks_price_data(
 ) -> pd.DataFrame:
 
     data_frames = []
-    nasdaq_df=get_nasdaq_data(period=period)
+    # 환경변수 MARKET_INDEX 지정 시 해당 지수(S&P=^GSPC 등), 없으면 나스닥 기본
+    import os
+    _idx = os.environ.get("MARKET_INDEX")
+    if _idx:
+        print(f"[시장지수 분기] {_idx}")
+        nasdaq_df = get_index_data(_idx, period=period)
+    else:
+        nasdaq_df = get_nasdaq_data(period=period)
     regime_df = get_market_regime_data(period=period)
 
     for ticker in tickers:

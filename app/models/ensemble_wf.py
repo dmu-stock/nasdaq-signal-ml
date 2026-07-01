@@ -14,8 +14,12 @@ import random
 
 random.seed(42); np.random.seed(42); torch.manual_seed(42)
 
+import os
 from app.config.config import GBM_FEATURE_COLS, LSTM_FEATURE_COLS
-from app.models.lstm_model import DualLSTMModel
+from app.models.lstm_model import DualLSTMModel, SingleLSTMModel
+# 환경변수 LSTM_ARCH=single 이면 Single-LSTM으로 비교 (기본: Dual)
+LSTMClass = SingleLSTMModel if os.environ.get('LSTM_ARCH') == 'single' else DualLSTMModel
+print(f"[LSTM 아키텍처] {LSTMClass.__name__}")
 from lightgbm import LGBMClassifier, early_stopping
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.preprocessing import StandardScaler
@@ -25,8 +29,11 @@ from sklearn.metrics import roc_auc_score
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 use_amp = device.type == 'cuda'
 
-GBM_CSV  = "feature__indicator_20260623.csv"
-LSTM_CSV = "feature__indicator_lstm20260623.csv"
+# 환경변수 DATA_TAG로 데이터셋 전환 (기본 20260623=나스닥, 20260701=S&P 검증)
+_TAG = os.environ.get('DATA_TAG', '20260623')
+GBM_CSV  = f"feature__indicator_{_TAG}.csv"
+LSTM_CSV = f"feature__indicator_lstm{_TAG}.csv"
+print(f"[데이터셋] {_TAG}")
 
 LGBM_TH = 0.54
 LSTM_TH = 0.49
@@ -44,6 +51,17 @@ gbm_df  = pd.read_csv(GBM_CSV);  gbm_df['date']  = pd.to_datetime(gbm_df['date']
 lstm_df = pd.read_csv(LSTM_CSV); lstm_df['date'] = pd.to_datetime(lstm_df['date'])
 
 gfeat, lfeat = GBM_FEATURE_COLS, LSTM_FEATURE_COLS
+
+# ---------------------------------------------------
+# 고전 전략 베이스라인용 신호 (Jegadeesh-Titman 모멘텀, RSI)
+# bluechip_price_data.csv에서 종목별 20일 모멘텀 계산 후 (date,ticker)로 머지
+# ---------------------------------------------------
+px = pd.read_csv("bluechip_price_data.csv")
+px['date'] = pd.to_datetime(px['date'])
+px = px.sort_values(['ticker', 'date'])
+# 과거 20일 수익률 (어제까지 → 인과적). t-1 기준 모멘텀으로 t일 진입
+px['mom20'] = px.groupby('ticker')['adj_close'].transform(lambda s: s.pct_change(20)).groupby(px['ticker']).shift(1)
+signal_df = px[['date', 'ticker', 'mom20']]
 
 
 # ---------------------------------------------------
@@ -72,7 +90,7 @@ def gbm_fold(tr_end, te_end):
     cal = CalibratedClassifierCV(m, method='sigmoid', cv='prefit')
     cal.fit(val[gfeat], val['label'])
 
-    out = te[['date', 'ticker', 'label']].copy()
+    out = te[['date', 'ticker', 'label', 'rsi']].copy()   # rsi: RSI 역추세 베이스라인용
     out['prob_lgb'] = cal.predict_proba(te[gfeat])[:, 1]
     return out  # actual = label(3일 +2.5%) = 매매 타깃
 
@@ -122,7 +140,7 @@ def lstm_fold(tr_end, te_end):
     cut = np.percentile(tr_ns, 80)
     fin = tr_ns <= cut; vm = tr_ns > cut
 
-    model = DualLSTMModel(len(lfeat)).to(device)
+    model = LSTMClass(len(lfeat)).to(device)
     cw = compute_class_weight('balanced', classes=np.unique(y[trm][fin]), y=y[trm][fin])
     pw = torch.tensor([cw[1]/cw[0]], dtype=torch.float32).to(device)
     crit = nn.BCEWithLogitsLoss(pos_weight=pw)
@@ -181,9 +199,33 @@ for tr_end, te_end in FOLDS:
     if g is None or l is None:
         print(f"{tr_end} ~ {te_end}  스킵"); continue
     e = pd.merge(g, l, on=['date', 'ticker'], how='inner')
+    e = pd.merge(e, signal_df, on=['date', 'ticker'], how='left')   # mom20 추가
     fold_data.append((tr_end, te_end, e))
 
 GBM_MIN = 0.50   # 실전 파이프라인과 동일: GBM 최소 기준 (현금 보유 여지)
+
+# ---------------------------------------------------
+# 임계값 비교: GBM_MIN 여러 값 (TOP_N=8 고정) — 논문 표용
+# ---------------------------------------------------
+print("===== 임계값(GBM_MIN) 비교 (TOP_N=8) =====")
+print(f"{'GBM_MIN':<10}{'재정렬 적중률':<14}{'배수':<8}{'진입수':<8}{'폴드별'}")
+for gmin in [0.40, 0.45, 0.50, 0.55, 0.60]:
+    rows_g = []
+    for tr_end, te_end, e in fold_data:
+        base = e['label'].mean()
+        rer = []
+        for date, grp in e.groupby('date'):
+            pool = grp[grp['prob_lgb'] >= gmin]
+            cand = pool.sort_values('prob_lgb', ascending=False).head(8)
+            rer += cand.sort_values('prob_lstm', ascending=False).head(3)['label'].tolist()
+        hit = np.mean(rer) if rer else 0.0
+        rows_g.append((hit, base, len(rer)))
+    hits_g = [r[0] for r in rows_g]
+    mults_g = [r[0]/r[1] for r in rows_g if r[1] > 0]
+    n_g = sum(r[2] for r in rows_g)
+    folds_g = ' / '.join(f'{h:.3f}' for h in hits_g)
+    print(f"{gmin:<10}{np.mean(hits_g):<14.4f}{np.mean(mults_g):<8.2f}{n_g:<8}{folds_g}")
+print()
 
 for TOP_N_GBM in [5, 6, 8, 10]:
     rows = []
@@ -238,3 +280,108 @@ for tr_end, te_end, e in fold_data:
         lstm_only += grp.sort_values('prob_lstm', ascending=False).head(3)['label'].tolist()
     print(f"{tr_end}~{te_end}  재정렬 {np.mean(rer):.4f}  GBM단독 {np.mean(gbm_only):.4f}  "
           f"LSTM단독 {np.mean(lstm_only):.4f}  베이스 {base:.4f}  (진입 {len(rer)}회)")
+
+# ---------------------------------------------------
+# 고전 전략 베이스라인 비교 (동일 폴드·동일 평가) — 논문 표용
+#   · 단순 모멘텀(Jegadeesh-Titman): 과거 20일 수익률 상위 3
+#   · RSI 역추세: RSI 낮은(과매도) 3
+#   · 시장평균: 라벨 자연 발생 비율
+# ---------------------------------------------------
+print("\n===== 고전 전략 베이스라인 비교 (Top3 적중률) =====")
+TOP_N_GBM = 8
+strat = {'시장평균': [], '단순모멘텀': [], 'RSI역추세': [], 'GBM단독': [], '재정렬앙상블': []}
+for tr_end, te_end, e in fold_data:
+    s = {k: [] for k in strat}
+    for date, grp in e.groupby('date'):
+        s['시장평균'].append(grp['label'].mean())
+        mom = grp.dropna(subset=['mom20'])
+        if len(mom) >= 3:
+            s['단순모멘텀'] += mom.sort_values('mom20', ascending=False).head(3)['label'].tolist()
+        s['RSI역추세'] += grp.sort_values('rsi', ascending=True).head(3)['label'].tolist()
+        s['GBM단독'] += grp.sort_values('prob_lgb', ascending=False).head(3)['label'].tolist()
+        pool = grp[grp['prob_lgb'] >= GBM_MIN]
+        cand = pool.sort_values('prob_lgb', ascending=False).head(TOP_N_GBM)
+        s['재정렬앙상블'] += cand.sort_values('prob_lstm', ascending=False).head(3)['label'].tolist()
+    for k in strat:
+        strat[k].append(np.mean(s[k]))
+
+print(f"{'전략':<12}{'평균 Top3 적중률':<16}{'폴드별'}")
+for k in ['시장평균', '단순모멘텀', 'RSI역추세', 'GBM단독', '재정렬앙상블']:
+    folds_str = ' / '.join(f'{v:.3f}' for v in strat[k])
+    print(f"{k:<12}{np.mean(strat[k]):<16.4f}{folds_str}")
+
+# ---------------------------------------------------
+# 통계적 유의성 (TOP_N=8) — Bootstrap CI + 짝지은 검정
+# ---------------------------------------------------
+from scipy import stats
+
+TOP_N_GBM = 8
+# 날짜를 블록으로 보존: 각 날의 픽 묶음(list)을 통째로 저장
+ens_days, gbm_days = [], []           # 각 원소 = 그날 픽들의 라벨 리스트
+daily_ens, daily_gbm = [], []         # 일별 적중률 쌍 — 짝지은 검정용
+
+for tr_end, te_end, e in fold_data:
+    for date, grp in e.groupby('date'):
+        pool = grp[grp['prob_lgb'] >= GBM_MIN]
+        cand = pool.sort_values('prob_lgb', ascending=False).head(TOP_N_GBM)
+        r3 = cand.sort_values('prob_lstm', ascending=False).head(3)['label'].tolist()
+        g3 = grp.sort_values('prob_lgb', ascending=False).head(3)['label'].tolist()
+        if not r3 or not g3:
+            continue
+        ens_days.append(r3)
+        gbm_days.append(g3)
+        daily_ens.append(np.mean(r3))
+        daily_gbm.append(np.mean(g3))
+
+daily_ens = np.array(daily_ens)
+daily_gbm = np.array(daily_gbm)
+
+def block_boot_ci(day_lists, n=2000, seed=42):
+    """일(day) 단위 블록 부트스트랩: 날짜를 복원추출하고, 뽑힌 날들의
+    픽을 모두 모아 전체 평균을 계산. 같은 날 종목 상관(블록)을 보존한다."""
+    rng = np.random.default_rng(seed)
+    D = len(day_lists)
+    idx = np.arange(D)
+    means = []
+    for _ in range(n):
+        pick = rng.choice(idx, size=D, replace=True)
+        pooled = [v for d in pick for v in day_lists[d]]
+        means.append(np.mean(pooled))
+    return np.percentile(means, 2.5), np.percentile(means, 97.5)
+
+ens_mean = np.mean([v for d in ens_days for v in d])
+gbm_mean = np.mean([v for d in gbm_days for v in d])
+
+print("\n===== 통계적 유의성 (TOP_N=8, 일 단위 블록 부트스트랩) =====")
+e_lo, e_hi = block_boot_ci(ens_days)
+g_lo, g_hi = block_boot_ci(gbm_days)
+print(f"앙상블  적중률 {ens_mean:.4f}  95% CI [{e_lo:.4f}, {e_hi:.4f}]  (영업일 {len(ens_days)}일)")
+print(f"GBM단독 적중률 {gbm_mean:.4f}  95% CI [{g_lo:.4f}, {g_hi:.4f}]  (영업일 {len(gbm_days)}일)")
+
+# 일별 적중률 짝지은 검정 (앙상블 vs GBM단독)
+diff = daily_ens - daily_gbm
+#t-검정
+t_stat, t_p = stats.ttest_rel(daily_ens, daily_gbm)
+try: # wilcoxon 검증
+    w_stat, w_p = stats.wilcoxon(daily_ens, daily_gbm)
+except ValueError:
+    w_p = float('nan')
+print(f"\n일별 적중률 차이 (앙상블 - GBM단독): 평균 {diff.mean():+.4f}  (영업일 {len(diff)}일)")
+print(f"  짝지은 t-test : t={t_stat:.3f}, p={t_p:.4f}")
+print(f"  Wilcoxon      : p={w_p:.4f}")
+
+# 차이값(앙상블-GBM)의 CI — 같은 날 쌍을 블록으로 보존 (CI 겹침 오해 차단)
+def diff_block_boot_ci(ens_days, gbm_days, n=2000, seed=42):
+    rng = np.random.default_rng(seed)
+    D = len(ens_days); idx = np.arange(D); diffs = []
+    for _ in range(n):
+        pick = rng.choice(idx, size=D, replace=True)
+        e = np.mean([v for d in pick for v in ens_days[d]])
+        g = np.mean([v for d in pick for v in gbm_days[d]])
+        diffs.append(e - g)
+    return np.percentile(diffs, 2.5), np.percentile(diffs, 97.5)
+
+d_lo, d_hi = diff_block_boot_ci(ens_days, gbm_days)
+print(f"  차이값 95% CI : [{d_lo:.4f}, {d_hi:.4f}]  "
+      f"→ {'0 미포함, 유의' if d_lo > 0 else '0 포함'}")
+print(f"  → p<0.05 이면 앙상블 우위가 통계적으로 유의함")

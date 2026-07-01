@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 import pandas as pd
 
-DB_PATH = "db/adv_ai.db"
+DB_PATH = os.environ.get("DB_FILE", "db/adv_ai.db")
 
 def get_connection():
     try:

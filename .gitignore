@@ -43,6 +43,7 @@ make_doc.py
 make_paper.py
 make_pdf.py
 make_fig.py
+make_cv.py
 *.docx
 *.pdf
 *.pptx

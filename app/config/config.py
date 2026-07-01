@@ -74,7 +74,7 @@ GBM_FEATURE_COLS = [
     # 'mfi',  
 ]
 
-TICKERS = [
+TICKERS = [   # 나스닥 41 (활성)
     # AI 반도체 (핵심)
     "NVDA", "AMD", "AVGO", "MU", "ARM", "SMCI",
 
@@ -110,4 +110,35 @@ TICKERS = [
 
     # 스토리지 (AI 데이터)
     "WDC", "STX",
+]
+TICKERS_SP = [   # S&P 39 (백업)
+    # 금융 (당신엔 없음)
+    "JPM", "BAC", "WFC", "GS", "MS",
+
+    # 헬스케어 (당신엔 없음)
+    "JNJ", "UNH", "LLY", "ABBV", "MRK", "PFE",
+
+    # 필수소비재
+    "PG", "KO", "PEP", "WMT", "COST",
+
+    # 산업재
+    "CAT", "BA", "HON", "GE", "UPS",
+
+    # 에너지
+    "XOM", "CVX", "COP",
+
+    # 소재
+    "LIN", "SHW", "FCX",
+
+    # 통신 (전통)
+    "VZ", "T", "CMCSA",
+
+    # 유틸리티
+    "DUK", "SO", "NEE",
+
+    # 부동산
+    "AMT", "PLD",
+
+    # 임의소비재 (전통)
+    "MCD", "NKE", "HD", "SBUX",
 ]
