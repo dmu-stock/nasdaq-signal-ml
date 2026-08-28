@@ -50,3 +50,18 @@ make_cv.py
 fig1_regime.png
 LSTM_레짐반전_정리.md
 
+# 스크래치 · 디버그 로그 (로컬 작업용)
+scratch_*.txt
+
+# 논문 작업 임시 디렉터리 / 재생성 가능 산출물
+_paper_unpack/
+backtest_wf_*.png
+eq_stoploss.png
+BACKTEST_STATUS.md
+paper_experiment_section.md
+
+# 논문 생성 스크립트 (로컬 작업용, 기존 make_* 패턴)
+make_paper_jiis.py
+make_paper_jiis_v2.py
+make_jiis_template.py
+

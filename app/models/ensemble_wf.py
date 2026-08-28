@@ -11,10 +11,16 @@ import torch
 import torch.nn as nn
 from torch.utils.data import TensorDataset, DataLoader
 import random
-
-random.seed(42); np.random.seed(42); torch.manual_seed(42)
-
 import os
+
+# 시드: 환경변수 SEED로 지정 (다중 시드 재현성 검증용, 기본 42)
+SEED = int(os.environ.get('SEED', '42'))
+random.seed(SEED); np.random.seed(SEED)
+torch.manual_seed(SEED); torch.cuda.manual_seed_all(SEED)
+# 같은 시드끼리 재현되도록 GPU 결정론 고정
+torch.backends.cudnn.deterministic = True
+torch.backends.cudnn.benchmark = False
+print(f"[SEED] {SEED} (cudnn deterministic)")
 from app.config.config import GBM_FEATURE_COLS, LSTM_FEATURE_COLS
 from app.models.lstm_model import DualLSTMModel, SingleLSTMModel
 # 환경변수 LSTM_ARCH=single 이면 Single-LSTM으로 비교 (기본: Dual)
@@ -72,7 +78,7 @@ def gbm_fold(tr_end, te_end):
     tr = d[d['date'] < tr_end]
     te = d[d['date'] >= tr_end]
     if len(te) < 50:
-        return None
+        return None, None
     cut = tr['date'].quantile(0.8)
     core = tr[tr['date'] <= cut]
     val  = tr[tr['date'] >  cut]
@@ -92,7 +98,10 @@ def gbm_fold(tr_end, te_end):
 
     out = te[['date', 'ticker', 'label', 'rsi']].copy()   # rsi: RSI 역추세 베이스라인용
     out['prob_lgb'] = cal.predict_proba(te[gfeat])[:, 1]
-    return out  # actual = label(3일 +2.5%) = 매매 타깃
+    # 검증셋 예측도 반환 (임계값 튜닝용 — test 미참조)
+    vout = val[['date', 'ticker', 'label']].copy()
+    vout['prob_lgb'] = cal.predict_proba(val[gfeat])[:, 1]
+    return out, vout  # actual = label(3일 +2.5%) = 매매 타깃
 
 
 # ---------------------------------------------------
@@ -135,7 +144,7 @@ def lstm_fold(tr_end, te_end):
     trm = dts < pd.Timestamp(tr_end)
     tem = dts >= pd.Timestamp(tr_end)
     if tem.sum() < 50 or len(np.unique(y[trm])) < 2:
-        return None
+        return None, None
     tr_ns = dts[trm].astype(np.int64).values
     cut = np.percentile(tr_ns, 80)
     fin = tr_ns <= cut; vm = tr_ns > cut
@@ -175,15 +184,27 @@ def lstm_fold(tr_end, te_end):
                 break
     model.load_state_dict(best_w)
 
-    model.eval(); tp = []
-    teL = dl(X20[tem], X60[tem], y[tem], False)
-    with torch.no_grad():
-        for a, b, c in teL:
-            a, b = a.to(device), b.to(device)
-            with torch.autocast(device.type, enabled=use_amp):
-                tp += torch.sigmoid(model(a, b)).cpu().tolist()
-    return pd.DataFrame({'date': dts[tem], 'ticker': tks[tem],
-                         'prob_lstm': tp, 'label_lstm': y[tem]})
+    model.eval()
+
+    def predict(mask):
+        pp = []
+        L = dl(X20[mask], X60[mask], y[mask], False)
+        with torch.no_grad():
+            for a, b, c in L:
+                a, b = a.to(device), b.to(device)
+                with torch.autocast(device.type, enabled=use_amp):
+                    pp += torch.sigmoid(model(a, b)).cpu().tolist()
+        return pp
+
+    tp = predict(tem)
+    test_df = pd.DataFrame({'date': dts[tem], 'ticker': tks[tem],
+                            'prob_lstm': tp, 'label_lstm': y[tem]})
+    # 검증셋(train 내부 vm) 예측 — 임계값 튜닝용
+    val_idx = np.where(trm)[0][vm]
+    vp = predict(val_idx)
+    val_df = pd.DataFrame({'date': dts[val_idx], 'ticker': tks[val_idx],
+                           'prob_lstm': vp, 'label_lstm': y[val_idx]})
+    return test_df, val_df
 
 
 # ---------------------------------------------------
@@ -193,14 +214,54 @@ print("===== 앙상블 Walk-Forward (GBM 후보 → LSTM 재정렬) =====\n")
 
 # 폴드별 예측을 한 번만 계산해서 재사용 (TOP_N 여러 개 비교용)
 fold_data = []
+val_data = []
 for tr_end, te_end in FOLDS:
-    g = gbm_fold(tr_end, te_end)
-    l = lstm_fold(tr_end, te_end)
+    g, gv = gbm_fold(tr_end, te_end)
+    l, lv = lstm_fold(tr_end, te_end)
     if g is None or l is None:
         print(f"{tr_end} ~ {te_end}  스킵"); continue
     e = pd.merge(g, l, on=['date', 'ticker'], how='inner')
     e = pd.merge(e, signal_df, on=['date', 'ticker'], how='left')   # mom20 추가
     fold_data.append((tr_end, te_end, e))
+    ev = pd.merge(gv, lv, on=['date', 'ticker'], how='inner')       # 검증셋
+    val_data.append((tr_end, te_end, ev))
+
+# ---------------------------------------------------
+# walk-forward OOS 예측 저장 (수익률 백테스트 입력용)
+#   각 폴드는 그 시점까지만 학습한 완전 OOS 예측. 4폴드를 이어 붙이면
+#   2024-07 ~ 2026-07 연속 OOS 구간이 된다.
+# ---------------------------------------------------
+_dump = []
+for _tr, _te, _e in fold_data:
+    _cols = ['date', 'ticker', 'label', 'prob_lgb', 'prob_lstm']
+    if 'label_lstm' in _e.columns:            # LSTM AUC 재현용(표 2)
+        _cols.append('label_lstm')
+    _tmp = _e[_cols].copy()
+    _tmp['fold'] = f'{_tr}~{_te}'
+    _dump.append(_tmp)
+if _dump:
+    _out = pd.concat(_dump, ignore_index=True)
+    _out.to_csv(f'ensemble_wf_predictions_seed{SEED}.csv', index=False)  # 시드별
+    _out.to_csv('ensemble_wf_predictions.csv', index=False)              # 기존 스크립트 호환
+    print(f"\n[저장] ensemble_wf_predictions_seed{SEED}.csv  "
+          f"({len(_out)}행, {len(_dump)}폴드)\n")
+
+# 검증셋 예측 저장 (임계값 튜닝용)
+_vdump = []
+for _tr, _te, _ev in val_data:
+    _t = _ev[['date', 'ticker', 'label', 'prob_lgb', 'prob_lstm']].copy()
+    _t['fold'] = f'{_tr}~{_te}'
+    _vdump.append(_t)
+if _vdump:
+    pd.concat(_vdump, ignore_index=True).to_csv('ensemble_wf_val_predictions.csv', index=False)
+    print(f"[저장] ensemble_wf_val_predictions.csv  "
+          f"({sum(len(x) for x in _vdump)}행, {len(_vdump)}폴드)\n")
+
+# 다중 시드 런에선 여기까지만 (아래 분석·부트스트랩 스킵)
+if os.environ.get('WF_QUIET') == '1':
+    import sys as _sys
+    print("[WF_QUIET] 예측 저장 완료, 분석부 스킵")
+    _sys.exit(0)
 
 GBM_MIN = 0.50   # 실전 파이프라인과 동일: GBM 최소 기준 (현금 보유 여지)
 

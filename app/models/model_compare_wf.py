@@ -68,6 +68,9 @@ def train_eval(ModelClass, tr_end, te_start, te_end, seed=42):
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
     if device.type == 'cuda':
         torch.cuda.manual_seed_all(seed)
+    # seed 42 표준과 동일한 결정론 재현성
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     d = scale_fold(df[df['date'] < te_end].copy(), tr_end)
     X20, X60, y, dts = make_seq(d)
