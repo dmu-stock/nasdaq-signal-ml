@@ -73,7 +73,7 @@ def scale_by_ticker(dataframe, features):
         scalers[ticker] = sc
 
     # 추론시 재사용
-    joblib.dump(scalers, 'ticker_scalers.pkl')
+    joblib.dump(scalers, 'artifacts/models/ticker_scalers.pkl')
     return scaled_df
 
 df_scaled = scale_by_ticker(df, feature_cols)
@@ -246,7 +246,7 @@ for epoch in range(1, EPOCHS + 1):
 model.load_state_dict(best_weights)
 torch.save(
     {'model_state_dict': best_weights, 'num_features': num_features},
-    'best_multi_input_lstm.pt',
+    'artifacts/models/best_multi_input_lstm.pt',
 )
 print(f"\n[저장] best_multi_input_lstm.pt  (best val_auc={best_auc:.4f})")
 

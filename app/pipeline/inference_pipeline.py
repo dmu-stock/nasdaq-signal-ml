@@ -22,15 +22,15 @@ print("듀얼 파이프라인 실전 추론")
 # ===================================================
 # 1. 모델 & 스케일러 로드
 # ===================================================
-lgb_model = joblib.load("best_lgbm_model.pkl")
+lgb_model = joblib.load("artifacts/models/best_lgbm_model.pkl")
 
 _device   = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-_ckpt     = torch.load('best_multi_input_lstm.pt', map_location=_device)
+_ckpt     = torch.load('artifacts/models/best_multi_input_lstm.pt', map_location=_device)
 lstm_model = DualLSTMModel(_ckpt['num_features']).to(_device)
 lstm_model.load_state_dict(_ckpt['model_state_dict'])
 lstm_model.eval()
 
-scalers = joblib.load('ticker_scalers.pkl')
+scalers = joblib.load('artifacts/models/ticker_scalers.pkl')
 print(f"모델 로드 완료  (device={_device})")
 
 # ===================================================
