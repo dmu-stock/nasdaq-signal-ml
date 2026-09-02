@@ -52,6 +52,7 @@ LSTM_레짐반전_정리.md
 
 # 스크래치 · 디버그 로그 (로컬 작업용)
 scratch_*.txt
+scratch/
 
 # 논문 작업 임시 디렉터리 / 재생성 가능 산출물
 _paper_unpack/

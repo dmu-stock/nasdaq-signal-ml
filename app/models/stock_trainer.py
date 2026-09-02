@@ -138,7 +138,7 @@ model.fit(
     ]
 )
 print(f"\n최적 트리 수: {model.best_iteration_}")
-joblib.dump(model, 'best_lgbm_model.pkl')
+joblib.dump(model, 'artifacts/models/best_lgbm_model.pkl')
 
 
 # -----------------------------
@@ -146,7 +146,7 @@ joblib.dump(model, 'best_lgbm_model.pkl')
 # -----------------------------
 calibrated = CalibratedClassifierCV(model, method='sigmoid', cv='prefit')
 calibrated.fit(X_val, y_val)
-joblib.dump(calibrated, 'best_lgbm_model.pkl')  # 같은 파일명으로 덮어쓰기
+joblib.dump(calibrated, 'artifacts/models/best_lgbm_model.pkl')  # 같은 파일명으로 덮어쓰기
 
 # 보정 후 분포 확인
 cal_prob = calibrated.predict_proba(X_test)[:, 1]

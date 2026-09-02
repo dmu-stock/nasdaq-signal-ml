@@ -92,6 +92,21 @@ class SingleLSTMModel(nn.Module):
         return self.out(x).squeeze(1)
 
 
+class Single60LSTMModel(SingleLSTMModel):
+    """비교용: 60일 단일 채널 LSTM (60일 단독 ablation).
+    SingleLSTMModel과 구조 동일, 입력만 60일 시퀀스(x60) 사용."""
+
+    def forward(self, x20: torch.Tensor, x60: torch.Tensor) -> torch.Tensor:
+        # x20은 인터페이스 호환용 (사용 안 함) — 60일만 사용
+        h = self.input_drop(x60)
+        h, _ = self.lstm_1(h)
+        h, _ = self.lstm_2(h)
+        out = self.out_drop(h[:, -1, :])
+        x = self.drop1(torch.relu(self.ln1(self.fc1(out))))
+        x = self.drop2(torch.relu(self.ln2(self.fc2(x))))
+        return self.out(x).squeeze(1)
+
+
 class DualGRUModel(nn.Module):
     """비교용: DualLSTMModel과 구조 동일, LSTM→GRU만 교체 (LSTM vs GRU 검증)."""
 

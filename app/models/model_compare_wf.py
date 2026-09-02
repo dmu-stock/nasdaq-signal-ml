@@ -7,6 +7,7 @@
 
 실행: python -m app.models.model_compare_wf
 """
+import os
 import pandas as pd
 import numpy as np
 import torch
@@ -15,7 +16,8 @@ from torch.utils.data import TensorDataset, DataLoader
 import random
 
 from app.config.config import LSTM_FEATURE_COLS
-from app.models.lstm_model import DualLSTMModel, SingleLSTMModel, DualGRUModel, DualTransformerModel
+from app.models.lstm_model import (DualLSTMModel, SingleLSTMModel, Single60LSTMModel,
+                                   DualGRUModel, DualTransformerModel)
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import roc_auc_score
 from sklearn.utils.class_weight import compute_class_weight
@@ -130,10 +132,17 @@ def train_eval(ModelClass, tr_end, te_start, te_end, seed=42):
 
 MODELS = [
     ("Single-LSTM (20일)", SingleLSTMModel),
+    ("Single-LSTM (60일)", Single60LSTMModel),
     ("Dual-GRU",           DualGRUModel),
     ("Dual-Transformer",   DualTransformerModel),
     ("Dual-LSTM (제안)",    DualLSTMModel),
 ]
+
+# 특정 모델만 실행하려면 환경변수 MC_ONLY(부분일치, 콤마구분) 지정
+_only = os.environ.get("MC_ONLY", "").strip()
+if _only:
+    keys = [k.strip() for k in _only.split(",") if k.strip()]
+    MODELS = [(n, M) for n, M in MODELS if any(k in n for k in keys)]
 
 print("===== 모델 비교 Walk-Forward (동일 데이터·폴드·설정) =====\n")
 print(f"{'모델':<22}{'평균 AUC':<10}{'폴드별 AUC'}")
