@@ -22,9 +22,10 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 print(f"[SEED] {SEED} (cudnn deterministic)")
 from app.config.config import GBM_FEATURE_COLS, LSTM_FEATURE_COLS
-from app.models.lstm_model import DualLSTMModel, SingleLSTMModel
-# 환경변수 LSTM_ARCH=single 이면 Single-LSTM으로 비교 (기본: Dual)
-LSTMClass = SingleLSTMModel if os.environ.get('LSTM_ARCH') == 'single' else DualLSTMModel
+from app.models.lstm_model import DualLSTMModel, SingleLSTMModel, Single60LSTMModel
+# 환경변수 LSTM_ARCH=single(20일)/single60(60일)이면 단일채널로 비교 (기본: Dual)
+LSTMClass = {'single': SingleLSTMModel,
+             'single60': Single60LSTMModel}.get(os.environ.get('LSTM_ARCH'), DualLSTMModel)
 print(f"[LSTM 아키텍처] {LSTMClass.__name__}")
 from lightgbm import LGBMClassifier, early_stopping
 from sklearn.calibration import CalibratedClassifierCV
@@ -431,15 +432,15 @@ print(f"\n일별 적중률 차이 (앙상블 - GBM단독): 평균 {diff.mean():+
 print(f"  짝지은 t-test : t={t_stat:.3f}, p={t_p:.4f}")
 print(f"  Wilcoxon      : p={w_p:.4f}")
 
-# 차이값(앙상블-GBM)의 CI — 같은 날 쌍을 블록으로 보존 (CI 겹침 오해 차단)
+# 차이값(앙상블-GBM)의 CI — 같은 날 짝지어진 일별 적중률 차이를 날짜 블록으로
+# 복원추출. 점추정(+0.022)·짝지은 t-검정·Wilcoxon과 동일한 '일별 차이' 기준으로 통일.
 def diff_block_boot_ci(ens_days, gbm_days, n=2000, seed=42):
     rng = np.random.default_rng(seed)
-    D = len(ens_days); idx = np.arange(D); diffs = []
+    daily = np.array([np.mean(e) - np.mean(g) for e, g in zip(ens_days, gbm_days)])
+    D = len(daily); idx = np.arange(D); diffs = []
     for _ in range(n):
         pick = rng.choice(idx, size=D, replace=True)
-        e = np.mean([v for d in pick for v in ens_days[d]])
-        g = np.mean([v for d in pick for v in gbm_days[d]])
-        diffs.append(e - g)
+        diffs.append(daily[pick].mean())
     return np.percentile(diffs, 2.5), np.percentile(diffs, 97.5)
 
 d_lo, d_hi = diff_block_boot_ci(ens_days, gbm_days)
