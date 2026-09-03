@@ -40,6 +40,14 @@ _REWRITE = (
     "질문: {question}"
 )
 
+_REFINE = (
+    "이전 시도들이 근거를 못 찾았다. 아래 질문에 '완전히 다른 각도'의 영어 검색어를 만들어라.\n"
+    "- 이전 검색어에 단어만 덧붙이지 마라.\n"
+    "- 다른 핵심 키워드·동의어·관련 이벤트·더 넓은 상위 개념을 시도하라.\n"
+    "검색어만 출력.\n"
+    "질문: {question}\n이미 실패한 검색어들: {tried}"       
+)
+
 def _format_docs(hits: list[tuple[Document, float]]) -> str:
     """검색결과(Document 목록) → 프롬프트에 넣을 텍스트."""
     if not hits:
@@ -54,12 +62,12 @@ def _format_docs(hits: list[tuple[Document, float]]) -> str:
 
 class NewsRAGChain:
     def __init__(self, settings: Settings):
-        self.vs  = NewsVectorStore(settings)               # ← ① 검색 담당
+        self.vs  = NewsVectorStore(settings)               # 검색 담당
         self.llm = ChatOpenAI(
             model=settings.chat_model,
             api_key=settings.openai_api_key,
             temperature=0.2,
-        ).with_structured_output(RAGAnswer)                # ← ② 생성 담당
+        ).with_structured_output(RAGAnswer)                # 생성 담당
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", _SYSTEM), ("user", _USER),
         ])
@@ -70,30 +78,41 @@ class NewsRAGChain:
             ChatPromptTemplate.from_messages([("user", _REWRITE)])
             | ChatOpenAI(model=settings.chat_model,
                          api_key=settings.openai_api_key, temperature=0)
-            | StrOutputParser()                       # ← LLM 답에서 순수 텍스트만 뽑음
+            | StrOutputParser()                       # LLM 답에서 순수 텍스트만 뽑음
         )
 
-    def ask(self, question: str, top_k: int = 5) -> dict:
-        # 한국어 질문 → 영어 검색어로 변환
-        english_query = self.rewrite_chain.invoke({"question": question}).strip()
-
-        # ① 검색 — LLM 아님, 벡터 유사도
-        hits = self.vs.search(english_query, ticker=None, k=top_k)  # vintage라 ticker=None
+        self.refine_chain = (
+            ChatPromptTemplate.from_messages([("user", _REFINE)])
+            | ChatOpenAI(model=settings.chat_model,
+                         api_key=settings.openai_api_key, temperature=0.5)
+            | StrOutputParser()
+        )
+         
+    def _search_and_answer(self, question: str, query: str, top_k: int) -> dict:
+        hits = self.vs.search(query, ticker=None, k=top_k)
         if not hits:
-            return {"answer": "관련 기사를 찾지 못했습니다.", "citations": [],
-                    "enough": "부족", "search_query": english_query}
-        # ② 생성 — 검색된 기사만 근거로
+            return {"answer": "관련 기사를 찾지 못했습니다.", "citations": [], "enough": "부족"}
         try:
-            result: RAGAnswer = self.chain.invoke({
-                "question": question,
-                "context": _format_docs(hits),
-            })
-            answer = result.model_dump()
-            answer["search_query"] = english_query
-            return answer
+            result: RAGAnswer = self.chain.invoke(
+                {"question": question, "context": _format_docs(hits)})
+            return result.model_dump()
         except Exception as error:
-            return {"answer": f"생성 실패 ({type(error).__name__}): {str(error)[:150]}",
-                    "citations": [], "enough": "부족", "search_query": english_query}
+            return {"answer": f"생성 실패 ({type(error).__name__})", "citations": [], "enough": "부족"}
+        
+    def ask(self, question: str, top_k: int = 5, max_tries: int = 3) -> dict:
+        query = self.rewrite_chain.invoke({"question": question}).strip()  # 한→영
+        trace, result = [], None
+        for attempt in range(1, max_tries + 1):
+            result = self._search_and_answer(question, query, top_k)       # 검색+생성
+            trace.append({"attempt": attempt, "query": query, "enough": result.get("enough")})
+            if result.get("enough") == "충분":
+                break 
+            tried = ", ".join(t["query"] for t in trace)                                                  
+            query = self.refine_chain.invoke(                            
+                {"question": question, "tried": tried}).strip()
+        result["search_query"] = trace[-1]["query"]
+        result["attempts"] = trace          # ← self-correction 과정 (덤: reasoning trace)
+        return result
 
 
 @lru_cache
