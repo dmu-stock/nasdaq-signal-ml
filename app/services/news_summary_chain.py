@@ -48,8 +48,8 @@ def _format_news(docs: list[NewsDoc]) -> str:
     if not docs:
         return "(뉴스 없음)"
     return "\n".join(
-        f"[{i}] ({d.date}, {d.source}) {d.title}\n    {d.summary}\n    출처: {d.url}"
-        for i, d in enumerate(docs, 1)
+        f"[{i}] ({doc.date}, {doc.source}) {doc.title}\n    {doc.summary}\n    출처: {doc.url}"
+        for i, doc in enumerate(docs, 1)
     )
 
 
@@ -77,8 +77,8 @@ class NewsSummaryChain:
                 "news_block": _format_news(docs),
             })
             return result.model_dump()
-        except Exception as e:
-            return {"overall_tone": f"요약 실패 ({type(e).__name__})", "key_points": [],
+        except Exception as error:
+            return {"overall_tone": f"요약 실패 ({type(error).__name__})", "key_points": [],
                     "notable_events": "-", "as_of": today}
 
 
