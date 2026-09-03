@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1 import endpoints
+from app.api.v1 import roboadvisor
 from app.database.sqlite_db import init_db
 
 
@@ -28,6 +29,7 @@ def create_app() -> FastAPI:
 
     # API 라우터 등록
     app.include_router(endpoints.router, prefix="/api/v1", tags=["v1"])
+    app.include_router(roboadvisor.router, prefix="/api/v1", tags=["roboadvisor"])
 
     @app.get("/")
     async def root():
