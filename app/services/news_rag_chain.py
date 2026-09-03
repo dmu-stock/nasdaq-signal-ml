@@ -44,12 +44,12 @@ def _format_docs(hits: list[tuple[Document, float]]) -> str:
     """검색결과(Document 목록) → 프롬프트에 넣을 텍스트."""
     if not hits:
         return "(검색 결과 없음)"
-    out = []
-    for i, (doc, score) in enumerate(hits, 1):
-        m = doc.metadata or {}
-        pub = (m.get("published_at", "") or "")[:10]
-        out.append(f"[{i}] ({pub}, {m.get('source', '?')})\n{doc.page_content}")
-    return "\n\n".join(out)
+    lines = []
+    for i, (doc, _score) in enumerate(hits, 1):
+        meta = doc.metadata or {}
+        published = (meta.get("published_at", "") or "")[:10]
+        lines.append(f"[{i}] ({published}, {meta.get('source', '?')})\n{doc.page_content}")
+    return "\n\n".join(lines)
 
 
 class NewsRAGChain:
@@ -73,27 +73,27 @@ class NewsRAGChain:
             | StrOutputParser()                       # ← LLM 답에서 순수 텍스트만 뽑음
         )
 
-    def ask(self, question: str, k: int = 5) -> dict:
-        #영어 검색어로 변환
-        en_query = self.rewrite_chain.invoke({"question": question}).strip()
+    def ask(self, question: str, top_k: int = 5) -> dict:
+        # 한국어 질문 → 영어 검색어로 변환
+        english_query = self.rewrite_chain.invoke({"question": question}).strip()
 
         # ① 검색 — LLM 아님, 벡터 유사도
-        hits = self.vs.search(en_query, ticker=None, k=k)  # vintage라 ticker=None
+        hits = self.vs.search(english_query, ticker=None, k=top_k)  # vintage라 ticker=None
         if not hits:
             return {"answer": "관련 기사를 찾지 못했습니다.", "citations": [],
-                    "enough": "부족", "search_query": en_query}
+                    "enough": "부족", "search_query": english_query}
         # ② 생성 — 검색된 기사만 근거로
         try:
             result: RAGAnswer = self.chain.invoke({
                 "question": question,
                 "context": _format_docs(hits),
             })
-            out = result.model_dump()
-            out["search_query"] = en_query  
-            return out
-        except Exception as e:
-            return {"answer": f"생성 실패 ({type(e).__name__}): {str(e)[:150]}",
-                    "citations": [], "enough": "부족", "search_query": en_query}
+            answer = result.model_dump()
+            answer["search_query"] = english_query
+            return answer
+        except Exception as error:
+            return {"answer": f"생성 실패 ({type(error).__name__}): {str(error)[:150]}",
+                    "citations": [], "enough": "부족", "search_query": english_query}
 
 
 @lru_cache
