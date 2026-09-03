@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 from app.core.config import Settings, get_settings
 from app.database.chroma_db import NewsVectorStore
 
+# 한국어 질문 쿼리 영어로 번역
+from langchain_core.output_parsers import StrOutputParser
 
 # ── 출력 스키마 ──
 class Citation(BaseModel):
@@ -32,6 +34,11 @@ _SYSTEM = (
 )
 _USER = "질문: {question}\n\n[검색된 기사]\n{context}\n\n위 기사만 근거로 답하라."
 
+_REWRITE = (
+    "Convert the user's stock question into a concise English search query "
+    "for a financial news database. Output ONLY the query text, no quotes.\n"
+    "질문: {question}"
+)
 
 def _format_docs(hits: list[tuple[Document, float]]) -> str:
     """검색결과(Document 목록) → 프롬프트에 넣을 텍스트."""
@@ -58,21 +65,35 @@ class NewsRAGChain:
         ])
         self.chain = self.prompt | self.llm                # LCEL (요약체인과 동일)
 
+        # 추가: 질문 → 영어 검색어 (temperature=0 = 창의성 끄고 정확히)
+        self.rewrite_chain = (
+            ChatPromptTemplate.from_messages([("user", _REWRITE)])
+            | ChatOpenAI(model=settings.chat_model,
+                         api_key=settings.openai_api_key, temperature=0)
+            | StrOutputParser()                       # ← LLM 답에서 순수 텍스트만 뽑음
+        )
+
     def ask(self, question: str, k: int = 5) -> dict:
+        #영어 검색어로 변환
+        en_query = self.rewrite_chain.invoke({"question": question}).strip()
+
         # ① 검색 — LLM 아님, 벡터 유사도
-        hits = self.vs.search(question, ticker=None, k=k)  # vintage라 ticker=None
+        hits = self.vs.search(en_query, ticker=None, k=k)  # vintage라 ticker=None
         if not hits:
-            return {"answer": "관련 기사를 찾지 못했습니다.", "citations": [], "enough": "부족"}
+            return {"answer": "관련 기사를 찾지 못했습니다.", "citations": [],
+                    "enough": "부족", "search_query": en_query}
         # ② 생성 — 검색된 기사만 근거로
         try:
             result: RAGAnswer = self.chain.invoke({
                 "question": question,
                 "context": _format_docs(hits),
             })
-            return result.model_dump()
+            out = result.model_dump()
+            out["search_query"] = en_query  
+            return out
         except Exception as e:
             return {"answer": f"생성 실패 ({type(e).__name__}): {str(e)[:150]}",
-                    "citations": [], "enough": "부족"}
+                    "citations": [], "enough": "부족", "search_query": en_query}
 
 
 @lru_cache
