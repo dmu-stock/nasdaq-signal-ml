@@ -14,7 +14,7 @@ from app.collector.news_fetch import fetch_recent_news
 from app.services.news_summary_chain import get_news_summary_chain
 from app.services.news_rag_chain import get_news_rag_chain
 from app.services.market_recap_chain import get_market_recap_chain
-from app.services.signal_service import get_buy_picks, get_ticker_signal
+from app.services.signal_store import get_buy_picks, get_ticker_signal  # CSV 리더(torch 불필요)
 
 
 @tool

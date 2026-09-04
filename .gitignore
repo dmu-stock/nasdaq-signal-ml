@@ -66,3 +66,7 @@ make_paper_jiis.py
 make_paper_jiis_v2.py
 make_jiis_template.py
 
+# 매수시그널 날짜별 CSV는 배포용으로 커밋 (전역 *.csv 무시를 뚫고 재포함)
+!data/signals/
+!data/signals/*.csv
+
