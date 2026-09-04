@@ -7,6 +7,7 @@ inference_pipeline.py(스크립트)를 함수+캐싱으로 재작성.
 from __future__ import annotations
 from datetime import date
 from functools import lru_cache
+import os
 
 import numpy as np
 import pandas as pd
@@ -45,9 +46,7 @@ def _compute_signals() -> dict:
         return {"ok": False, "reason": "시장 데이터 수집 실패", "signals": []}
 
     vix_now = float(df_raw["vix"].iloc[-1])
-    if vix_now >= 30:                                    # exit() 대신 return
-        return {"ok": True, "vix": round(vix_now, 2), "signals": [],
-                "reason": f"VIX {vix_now:.1f} 극공포 → 매수 중단"}
+    # VIX 극공포 가드레일은 리더(signal_store)에서 적용 — 여기선 전 종목을 항상 계산·저장한다.
 
     gbm_proc, lstm_proc = FeatureProcessorGBM(), FeatureProcessorLSTM()
     df_gbm = gbm_proc.calc_technical_indicators(df_raw.copy(), is_inference=True).replace([np.inf, -np.inf], np.nan)
@@ -75,7 +74,8 @@ def _compute_signals() -> dict:
         results.append({"ticker": ticker, "prob_lgb": round(float(prob_lgb), 4),
                         "prob_lstm": round(prob_lstm, 4), "final_prob": round(final_prob, 4)})
 
-    return {"ok": True, "vix": round(vix_now, 2), "signals": results, "reason": ""}
+    return {"ok": True, "vix": round(vix_now, 2), "signals": results,
+            "date": str(date.today()), "reason": ""}
 
 
 @lru_cache(maxsize=1)
@@ -106,3 +106,18 @@ def get_ticker_signal(ticker: str) -> dict:
         if s["ticker"] == ticker.upper():
             return {**s, "buy": s["prob_lgb"] >= GBM_MIN}
     return {"ticker": ticker.upper(), "error": "학습 유니버스에 없거나 데이터 부족"}
+
+
+def save_signals(dir_path: str = "data/signals") -> str:
+    """모델 추론 → 날짜별 CSV 저장 (data/signals/signal_YYYY-MM-DD.csv). 로컬에서 실행(torch 필요)."""
+    data = _compute_signals()
+    if not data.get("signals"):
+        return f"저장 안 함: {data.get('reason', '시그널 없음')}"
+    day = data["date"]
+    os.makedirs(dir_path, exist_ok=True)
+    path = os.path.join(dir_path, f"signal_{day}.csv")
+    df = pd.DataFrame(data["signals"])
+    df.insert(0, "date", day)
+    df["vix"] = data["vix"]
+    df.to_csv(path, index=False, encoding="utf-8")
+    return f"저장: {path} ({len(df)}종목, VIX {data['vix']}, {day})"
