@@ -13,6 +13,7 @@ from app.collector.news_fetch import fetch_recent_news
 from app.services.news_summary_chain import get_news_summary_chain
 from app.services.news_rag_chain import get_news_rag_chain
 from app.services.market_recap_chain import get_market_recap_chain
+from app.services.signal_service import get_buy_picks
 from app.services.chatbot import StockChatbot
 
 router = APIRouter()
@@ -67,6 +68,13 @@ def research(body: ResearchRequest):
 def market_recap():
     """전날 미국증시 요약 (지수·특징주·매크로·지정학)."""
     return get_market_recap_chain().generate()
+
+
+# ── ML 매수 시그널 (LGBM+LSTM 재정렬 앙상블) ──
+@router.get("/signal")
+def signal(top_n: int = 3):
+    """오늘의 ML 매수 시그널 top-N. (첫 호출은 모델 추론으로 수십초)"""
+    return get_buy_picks(top_n=top_n)
 
 
 # ── 챗봇 ──

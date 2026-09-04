@@ -1,6 +1,7 @@
 """뉴스 RAG 체인: 질문 → ChromaDB 검색 → 검색된 기사 근거로 LLM 답변."""
 from __future__ import annotations
 from functools import lru_cache
+from datetime import date 
 
 from langchain_core.documents import Document
 from langchain_core.prompts import ChatPromptTemplate
@@ -34,18 +35,20 @@ _SYSTEM = (
 )
 _USER = "질문: {question}\n\n[검색된 기사]\n{context}\n\n위 기사만 근거로 답하라."
 
-_REWRITE = (
-    "Convert the user's stock question into a concise English search query "
-    "for a financial news database. Output ONLY the query text, no quotes.\n"
-    "질문: {question}"
-)
-
 _REFINE = (
     "이전 시도들이 근거를 못 찾았다. 아래 질문에 '완전히 다른 각도'의 영어 검색어를 만들어라.\n"
     "- 이전 검색어에 단어만 덧붙이지 마라.\n"
     "- 다른 핵심 키워드·동의어·관련 이벤트·더 넓은 상위 개념을 시도하라.\n"
     "검색어만 출력.\n"
     "질문: {question}\n이미 실패한 검색어들: {tried}"       
+)
+
+_REWRITE = (
+    "Today is {today}. Convert the user's stock question into a concise English "
+    "search query for a financial news database. Resolve relative dates using today "
+    "(작년=last year, 지난달=last month, 요즘=recent 등) into explicit years. "
+    "Output ONLY the query text, no quotes.\n"
+    "질문: {question}"
 )
 
 def _format_docs(hits: list[tuple[Document, float]]) -> str:
@@ -100,7 +103,7 @@ class NewsRAGChain:
             return {"answer": f"생성 실패 ({type(error).__name__})", "citations": [], "enough": "부족"}
         
     def ask(self, question: str, top_k: int = 5, max_tries: int = 3) -> dict:
-        query = self.rewrite_chain.invoke({"question": question}).strip()  # 한→영
+        query = self.rewrite_chain.invoke({"question": question,"today": str(date.today())}).strip()  # 한→영
         trace, result = [], None
         for attempt in range(1, max_tries + 1):
             result = self._search_and_answer(question, query, top_k)       # 검색+생성
