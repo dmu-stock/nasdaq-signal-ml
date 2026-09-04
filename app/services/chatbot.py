@@ -14,6 +14,7 @@ from app.collector.news_fetch import fetch_recent_news
 from app.services.news_summary_chain import get_news_summary_chain
 from app.services.news_rag_chain import get_news_rag_chain
 from app.services.market_recap_chain import get_market_recap_chain
+from app.services.signal_service import get_buy_picks, get_ticker_signal
 
 
 @tool
@@ -52,6 +53,17 @@ def get_market_recap() -> str:
     '증시 어때/시장 상황/전쟁 여파/유가·금/거시' 같은 시장 전반 질문에 사용."""
     return json.dumps(get_market_recap_chain().generate(), ensure_ascii=False)
 
+@tool
+def buy_signal() -> str:
+    """오늘의 ML 매수 시그널(top 종목). '매수 시그널/오늘 뭐 사?'에 사용.
+    (처음 호출은 모델 추론으로 수십초 걸림)"""
+    return json.dumps(get_buy_picks(), ensure_ascii=False)
+
+@tool
+def ticker_signal(ticker: str) -> str:
+    """특정 종목의 ML 매수 점수(LGBM·LSTM 확률). '엔비디아 시그널 어때?'에 사용. ticker=심볼."""
+    return json.dumps(get_ticker_signal(ticker), ensure_ascii=False)
+
 
 _SYSTEM = (
     "너는 미국 주식 리서치 어시스턴트다. 한국어로 정중히 답한다.\n"
@@ -62,12 +74,13 @@ _SYSTEM = (
     "- '작년/과거/왜 올랐·빠졌' 질문 → research_past_news\n"
     "- 여러 도구가 필요하면 순서대로 호출해도 된다.\n"
     "- 도구 결과의 출처를 답에 밝히고, 없는 사실은 지어내지 않는다.\n"
+    "- '매수 시그널/오늘 뭐 사/시그널 점수' 질문 → buy_signal 또는 ticker_signal\n"
 )
 
 
 class StockChatbot:
     def __init__(self, settings: Settings):
-        self.tools = [summarize_recent_news, research_past_news, get_stock_price, get_market_recap]
+        self.tools = [summarize_recent_news, research_past_news, get_stock_price, get_market_recap, buy_signal, ticker_signal]
         self.by_name = {tool_obj.name: tool_obj for tool_obj in self.tools}
         self.llm = ChatOpenAI(
             model=settings.chat_model, api_key=settings.openai_api_key, temperature=0,
