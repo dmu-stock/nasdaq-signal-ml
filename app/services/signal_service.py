@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 import joblib
 import torch
+from sklearn.preprocessing import StandardScaler
 
 from app.config.config import GBM_FEATURE_COLS, LSTM_FEATURE_COLS, TICKERS
 from app.models.lstm_model import DualLSTMModel
@@ -22,6 +23,10 @@ from app.features.processor_lstm import FeatureProcessorLSTM
 
 GBM_MIN, TOP_N_GBM = 0.50, 8
 SEQ_LEN_20, SEQ_LEN_60 = 20, 60
+
+# 학습 유니버스(41) 외에 앱에서 시그널을 낼 추가 종목 (재학습 없이 추론만, out-of-distribution)
+EXTRA_TICKERS = ["SNOW", "SOFI", "RIVN", "ABNB", "SHOP","MSTR","QCOM","MDB","IREN","TSM","MRVL","LITE"]
+ALL_TICKERS = TICKERS + EXTRA_TICKERS
 
 
 @lru_cache(maxsize=1)
@@ -41,7 +46,7 @@ def _compute_signals() -> dict:
     """전 종목 추론 → {ok, vix, signals[], reason}. print·exit 없음."""
     lgb_model, lstm_model, scalers, device = _load_models()
 
-    df_raw = fetch_all_stocks_price_data(tickers=TICKERS, period="2y")
+    df_raw = fetch_all_stocks_price_data(tickers=ALL_TICKERS, period="2y")
     if df_raw.empty:
         return {"ok": False, "reason": "시장 데이터 수집 실패", "signals": []}
 
@@ -53,16 +58,18 @@ def _compute_signals() -> dict:
     df_lstm = lstm_proc.calc_technical_indicators(df_raw.copy(), is_inference=True).replace([np.inf, -np.inf], np.nan)
 
     results = []
-    for ticker in TICKERS:
+    for ticker in ALL_TICKERS:
         tg = df_gbm[df_gbm["ticker"] == ticker].sort_values("date")
         if tg.empty:
             continue
         prob_lgb = lgb_model.predict_proba(tg[GBM_FEATURE_COLS].iloc[[-1]])[0][1]
 
         tl = df_lstm[df_lstm["ticker"] == ticker].sort_values("date")
-        if len(tl) < SEQ_LEN_60 or ticker not in scalers:
+        if len(tl) < SEQ_LEN_60:
             continue
-        sc = scalers[ticker]
+        sc = scalers.get(ticker)
+        if sc is None:                                       # 학습에 없던 종목: 즉석 스케일러 fit
+            sc = StandardScaler().fit(tl[LSTM_FEATURE_COLS])
         seq20 = sc.transform(pd.DataFrame(tl[LSTM_FEATURE_COLS].iloc[-SEQ_LEN_20:].values, columns=LSTM_FEATURE_COLS))
         seq60 = sc.transform(pd.DataFrame(tl[LSTM_FEATURE_COLS].iloc[-SEQ_LEN_60:].values, columns=LSTM_FEATURE_COLS))
         t20 = torch.tensor(seq20, dtype=torch.float32).unsqueeze(0).to(device)
@@ -72,7 +79,8 @@ def _compute_signals() -> dict:
 
         final_prob = 2 * (prob_lgb * prob_lstm) / (prob_lgb + prob_lstm + 1e-9)
         results.append({"ticker": ticker, "prob_lgb": round(float(prob_lgb), 4),
-                        "prob_lstm": round(prob_lstm, 4), "final_prob": round(final_prob, 4)})
+                        "prob_lstm": round(prob_lstm, 4), "final_prob": round(final_prob, 4),
+                        "extra": ticker not in TICKERS})   # 학습 유니버스 밖(확장종목) 표시
 
     return {"ok": True, "vix": round(vix_now, 2), "signals": results,
             "date": str(date.today()), "reason": ""}
