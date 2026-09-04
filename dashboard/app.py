@@ -3,12 +3,14 @@
 FastAPI(http://localhost:8000)를 HTTP로만 호출한다 — 모델 직접 로드 X (MSA).
 실행: streamlit run dashboard/app.py
 """
+import os
 import uuid
 
 import requests
 import streamlit as st
 
-API = "http://localhost:8000/api/v1"
+# 로컬: localhost, 배포: 환경변수 API_URL(배포된 API 주소) 자동 사용
+API = os.getenv("API_URL", "http://localhost:8000/api/v1")
 
 st.set_page_config(page_title="US 주식 AI 리서치", page_icon="📈", layout="centered")
 st.title("📈 US 주식 AI 리서치")
