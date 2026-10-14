@@ -32,11 +32,11 @@ plt.rcParams["axes.edgecolor"] = "#3a3f45"
 plt.rcParams["axes.linewidth"] = 0.9
 
 T = {
-    "ko": dict(ens="앙상블(재정렬)", mom="단순 모멘텀", rnd="무작위 3종목",
+    "ko": dict(ens="재순위화 방식", mom="단순 모멘텀", rnd="무작위 3종목",
                ew="동일가중", nq="나스닥",
                ylab="폴드 누적수익 %", xlab="",
-               title="그림. 국면별 단순 모멘텀 vs 앙상블 — 2025 H1 모멘텀 붕괴와 앙상블의 강건성",
-               note="2025 H1: 단순 모멘텀 붕괴({mom:+.0f}%) ↔ 앙상블 견고({ens:+.0f}%)"),
+               title="그림. 국면별 단순 모멘텀 vs 재순위화 방식 — 2025 H1 모멘텀 붕괴와 재순위화 방식의 강건성",
+               note="2025 H1: 단순 모멘텀 붕괴({mom:+.0f}%) ↔ 재순위화 방식 견고({ens:+.0f}%)"),
     "en": dict(ens="Ensemble (rerank)", mom="Simple momentum", rnd="Random-3",
                ew="Equal-weight", nq="Nasdaq",
                ylab="Fold cumulative return %", xlab="",
@@ -93,7 +93,11 @@ def strat_returns(sub, kind, rng=None):
         elif kind == "rnd":
             rv = g["ret_t3"].dropna().values
             r = pd.Series(rng.choice(rv, min(TOPN, len(rv)), replace=False)) if len(rv) else pd.Series([], dtype=float)
-        out[d] = (r.mean() - COST) if len(r) else 0.0
+        if kind == "ens":
+            # 자본배분 B(표 10과 동일): 3슬롯 1/3씩, 빈 슬롯은 현금. 비용도 투자분에만.
+            out[d] = (r.sum() / TOPN - COST * len(r) / TOPN) if len(r) else 0.0
+        else:
+            out[d] = (r.mean() - COST) if len(r) else 0.0
     return out
 
 

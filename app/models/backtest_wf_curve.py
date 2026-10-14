@@ -29,17 +29,17 @@ plt.rcParams["axes.linewidth"] = 0.9
 
 T = {
     "ko": dict(
-        strat="앙상블 Top3 전략", bench="나스닥 Buy & Hold", ylab="누적 자본 (초기=1.0)",
+        strat="재순위화 방식", bench="나스닥 Buy & Hold", ylab="누적 자본 (초기=1.0)",
         ddlab="낙폭 %", loss="손실 국면",
-        title="그림. 앙상블 Top3 전략의 자본곡선과 낙폭 (Walk-Forward OOS, 중앙값 시드, 비용 0.1%)",
+        title="재순위화 방식의 자본곡선과 낙폭 (Walk-Forward OOS, 표준 실행 seed 42, 비용 0.1%)",
         cap="전체 OOS: 누적 +{tot:.0f}%  ·  CAGR +{cagr:.0f}%  ·  MDD {mdd:.1f}%   |   "
             "나스닥: +{nq:.0f}%   |   회색 점선 = 폴드(재학습) 경계",
     ),
     "en": dict(
-        strat="Ensemble Top-3 strategy", bench="Nasdaq Buy & Hold",
+        strat="Two-stage reranking", bench="Nasdaq Buy & Hold",
         ylab="Cumulative capital (start = 1.0)", ddlab="Drawdown %", loss="Loss regime",
-        title="Fig. Equity curve and drawdown of the ensemble Top-3 strategy "
-              "(Walk-Forward OOS, median seed, 0.1% cost)",
+        title="Equity curve and drawdown of the two-stage reranking approach "
+              "(Walk-Forward OOS, standard run seed 42, 0.1% cost)",
         cap="Full OOS: cum. +{tot:.0f}%  ·  CAGR +{cagr:.0f}%  ·  MDD {mdd:.1f}%   |   "
             "Nasdaq: +{nq:.0f}%   |   dashed grey = fold (retrain) boundaries",
     ),
