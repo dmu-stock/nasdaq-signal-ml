@@ -58,12 +58,14 @@ with tab_signal:
                 st.warning(data.get("reason") or "오늘 매수 후보 없음 — 현금 보유 권장")
             else:
                 for rank, pick in enumerate(picks, 1):
+                    badge = " · 🧪 확장(참고)" if pick.get("extra") else " · 🎓 학습종목"
                     st.markdown(
-                        f"### {rank}. {pick['ticker']}\n"
+                        f"### {rank}. {pick['ticker']}{badge}\n"
                         f"종합점수 **{pick['final_prob']:.3f}** · "
                         f"GBM(단기) {pick['prob_lgb']:.3f} · LSTM(중기) {pick['prob_lstm']:.3f}"
                     )
                     st.progress(min(max(pick["final_prob"], 0.0), 1.0))
+                st.caption("🎓 학습종목 = 검증된 유니버스 · 🧪 확장종목 = 학습분포 밖(참고용)")
             st.caption("⚠️ 동일 유니버스 내 상대 순위 신호입니다. 절대 수익을 보장하지 않으며 교육 목적입니다.")
 
 # ── 탭 1: 최신 뉴스 요약 ──

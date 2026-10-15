@@ -28,7 +28,12 @@ def _resolve_path(day: str | None = None) -> str | None:
 
 def _load(day: str | None = None) -> pd.DataFrame | None:
     path = _resolve_path(day)
-    return pd.read_csv(path) if path else None
+    if not path:
+        return None
+    df = pd.read_csv(path)
+    if "extra" in df.columns:  # CSV의 True/False 문자열을 진짜 bool로 (문자열 truthy 함정 방지)
+        df["extra"] = df["extra"].astype(str).str.lower().isin(["true", "1"])
+    return df
 
 
 def get_buy_picks(top_n: int = 3) -> dict:
@@ -44,8 +49,11 @@ def get_buy_picks(top_n: int = 3) -> dict:
                 "reason": f"VIX {vix:.1f} 극공포 → 매수 중단"}
     cand = df[df["prob_lgb"] >= GBM_MIN].sort_values("prob_lgb", ascending=False).head(TOP_N_GBM)
     picks = cand.sort_values("prob_lstm", ascending=False).head(top_n)
+    cols = ["ticker", "prob_lgb", "prob_lstm", "final_prob"]
+    if "extra" in picks.columns:
+        cols.append("extra")   # 확장종목(참고) 구분용
     return {
-        "picks": picks[["ticker", "prob_lgb", "prob_lstm", "final_prob"]].to_dict("records"),
+        "picks": picks[cols].to_dict("records"),
         "vix": vix,
         "as_of": as_of,
         "reason": "" if not picks.empty else f"GBM {GBM_MIN} 이상 없음 — 현금 권장",
@@ -67,5 +75,6 @@ def get_ticker_signal(ticker: str) -> dict:
         "prob_lstm": float(r["prob_lstm"]),
         "final_prob": float(r["final_prob"]),
         "buy": float(r["prob_lgb"]) >= GBM_MIN,
+        "extra": bool(r["extra"]) if "extra" in df.columns else False,  # 확장종목(참고)
         "as_of": str(r["date"]),
     }

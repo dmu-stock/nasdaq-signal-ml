@@ -70,3 +70,7 @@ make_jiis_template.py
 !data/signals/
 !data/signals/*.csv
 
+# 배포용 서브셋 벡터DB (100MB 이하, 커밋 허용 — full chroma_db는 계속 무시)
+!chroma_db_deploy/
+!chroma_db_deploy/**
+

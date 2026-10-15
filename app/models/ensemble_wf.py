@@ -39,8 +39,10 @@ use_amp = device.type == 'cuda'
 # 환경변수 DATA_TAG로 데이터셋 전환 (기본 20260623=나스닥, 20260701=S&P 검증)
 _TAG = os.environ.get('DATA_TAG', '20260623')
 GBM_CSV  = f"feature__indicator_{_TAG}.csv"
-LSTM_CSV = f"feature__indicator_lstm{_TAG}.csv"
-print(f"[데이터셋] {_TAG}")
+LSTM_CSV = os.environ.get('LSTM_CSV_OVERRIDE') or f"feature__indicator_lstm{_TAG}.csv"
+_OUT_SUFFIX = os.environ.get('OUT_SUFFIX', '')   # 실험용 출력 접미사(기본 '' → 파일명 불변)
+_TRAIN_PREDS = []                                 # DUMP_TRAIN=1 시 학습기간 LSTM 예측 수집
+print(f"[데이터셋] {_TAG}  (LSTM_CSV={LSTM_CSV}, OUT_SUFFIX='{_OUT_SUFFIX}')")
 
 LGBM_TH = 0.54
 LSTM_TH = 0.49
@@ -58,6 +60,9 @@ gbm_df  = pd.read_csv(GBM_CSV);  gbm_df['date']  = pd.to_datetime(gbm_df['date']
 lstm_df = pd.read_csv(LSTM_CSV); lstm_df['date'] = pd.to_datetime(lstm_df['date'])
 
 gfeat, lfeat = GBM_FEATURE_COLS, LSTM_FEATURE_COLS
+if os.environ.get('LSTM_FEATS_OVERRIDE'):
+    lfeat = os.environ['LSTM_FEATS_OVERRIDE'].split(',')
+    print(f"[LSTM 피처 오버라이드] {lfeat}")
 
 # ---------------------------------------------------
 # 고전 전략 베이스라인용 신호 (Jegadeesh-Titman 모멘텀, RSI)
@@ -72,6 +77,23 @@ signal_df = px[['date', 'ticker', 'mom20']]
 
 
 # ---------------------------------------------------
+# Purge/embargo: 라벨 예측기간이 다음 구간과 중첩되는 경계 표본 제거
+#   PURGE=1 일 때만 활성 (GBM 라벨 3영업일, LSTM 라벨 5영업일)
+# ---------------------------------------------------
+PURGE = os.environ.get('PURGE') == '1'
+GBM_PURGE_H, LSTM_PURGE_H = 3, 5
+if PURGE:
+    print(f"[PURGE] 경계 표본 제거 활성 (GBM {GBM_PURGE_H}일 / LSTM {LSTM_PURGE_H}일)")
+
+def _drop_tail_days(df, h):
+    """df에서 마지막 h개 거래일 표본 제거 (라벨이 다음 구간을 넘보는 경계)."""
+    ds = np.sort(df['date'].unique())
+    if len(ds) <= h:
+        return df
+    return df[df['date'] < ds[-h]]
+
+
+# ---------------------------------------------------
 # GBM: 폴드별 학습 + sigmoid 보정 → 테스트 예측
 # ---------------------------------------------------
 def gbm_fold(tr_end, te_end):
@@ -80,9 +102,13 @@ def gbm_fold(tr_end, te_end):
     te = d[d['date'] >= tr_end]
     if len(te) < 50:
         return None, None
+    if PURGE:                              # 학습/테스트 경계: 라벨 중첩 제거
+        tr = _drop_tail_days(tr, GBM_PURGE_H)
     cut = tr['date'].quantile(0.8)
     core = tr[tr['date'] <= cut]
     val  = tr[tr['date'] >  cut]
+    if PURGE:                              # core/val 경계: core 라벨이 val 넘봄 방지
+        core = _drop_tail_days(core, GBM_PURGE_H)
 
     m = LGBMClassifier(
         n_estimators=2000, learning_rate=0.005, max_depth=6, num_leaves=31,
@@ -144,11 +170,19 @@ def lstm_fold(tr_end, te_end):
     dts = pd.to_datetime(dts)
     trm = dts < pd.Timestamp(tr_end)
     tem = dts >= pd.Timestamp(tr_end)
+    if PURGE:                              # 학습/테스트 경계: 마지막 5거래일 제거
+        _trd = np.sort(np.unique(dts[trm]))
+        if len(_trd) > LSTM_PURGE_H:
+            trm = trm & (dts < _trd[-LSTM_PURGE_H])
     if tem.sum() < 50 or len(np.unique(y[trm])) < 2:
         return None, None
     tr_ns = dts[trm].astype(np.int64).values
     cut = np.percentile(tr_ns, 80)
     fin = tr_ns <= cut; vm = tr_ns > cut
+    if PURGE:                              # core/val 경계: core 마지막 5거래일 제거
+        _cn = np.sort(np.unique(tr_ns[fin]))
+        if len(_cn) > LSTM_PURGE_H:
+            fin = fin & (tr_ns < _cn[-LSTM_PURGE_H])
 
     model = LSTMClass(len(lfeat)).to(device)
     cw = compute_class_weight('balanced', classes=np.unique(y[trm][fin]), y=y[trm][fin])
@@ -205,6 +239,12 @@ def lstm_fold(tr_end, te_end):
     vp = predict(val_idx)
     val_df = pd.DataFrame({'date': dts[val_idx], 'ticker': tks[val_idx],
                            'prob_lstm': vp, 'label_lstm': y[val_idx]})
+    if os.environ.get('DUMP_TRAIN') == '1':      # 학습기간(< tr_end) 예측 저장 (Train IC 실험용)
+        tr_idx = np.where(trm)[0]
+        trp = predict(tr_idx)
+        _TRAIN_PREDS.append(pd.DataFrame({'date': dts[tr_idx], 'ticker': tks[tr_idx],
+                                          'prob_lstm': trp, 'label_lstm': y[tr_idx],
+                                          'fold': f'{tr_end}~{te_end}'}))
     return test_df, val_df
 
 
@@ -242,9 +282,10 @@ for _tr, _te, _e in fold_data:
     _dump.append(_tmp)
 if _dump:
     _out = pd.concat(_dump, ignore_index=True)
-    _out.to_csv(f'ensemble_wf_predictions_seed{SEED}.csv', index=False)  # 시드별
-    _out.to_csv('ensemble_wf_predictions.csv', index=False)              # 기존 스크립트 호환
-    print(f"\n[저장] ensemble_wf_predictions_seed{SEED}.csv  "
+    _out.to_csv(f'ensemble_wf_predictions_seed{SEED}{_OUT_SUFFIX}.csv', index=False)  # 시드별
+    if _OUT_SUFFIX == '':
+        _out.to_csv('ensemble_wf_predictions.csv', index=False)          # 기존 호환(기본 실행만)
+    print(f"\n[저장] ensemble_wf_predictions_seed{SEED}{_OUT_SUFFIX}.csv  "
           f"({len(_out)}행, {len(_dump)}폴드)\n")
 
 # 검증셋 예측 저장 (임계값 튜닝용)
@@ -254,9 +295,15 @@ for _tr, _te, _ev in val_data:
     _t['fold'] = f'{_tr}~{_te}'
     _vdump.append(_t)
 if _vdump:
-    pd.concat(_vdump, ignore_index=True).to_csv('ensemble_wf_val_predictions.csv', index=False)
-    print(f"[저장] ensemble_wf_val_predictions.csv  "
+    pd.concat(_vdump, ignore_index=True).to_csv(f'ensemble_wf_val_predictions{_OUT_SUFFIX}.csv', index=False)
+    print(f"[저장] ensemble_wf_val_predictions{_OUT_SUFFIX}.csv  "
           f"({sum(len(x) for x in _vdump)}행, {len(_vdump)}폴드)\n")
+
+# 학습기간 예측 저장 (DUMP_TRAIN=1) — Train IC 실험용
+if _TRAIN_PREDS:
+    _tr_out = pd.concat(_TRAIN_PREDS, ignore_index=True)
+    _tr_out.to_csv(f'ensemble_wf_train_predictions_seed{SEED}{_OUT_SUFFIX}.csv', index=False)
+    print(f"[저장] ensemble_wf_train_predictions_seed{SEED}{_OUT_SUFFIX}.csv  ({len(_tr_out)}행)\n")
 
 # 다중 시드 런에선 여기까지만 (아래 분석·부트스트랩 스킵)
 if os.environ.get('WF_QUIET') == '1':
